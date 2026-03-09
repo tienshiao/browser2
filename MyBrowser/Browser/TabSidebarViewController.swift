@@ -218,6 +218,9 @@ extension TabSidebarViewController: NSTableViewDelegate {
 class TabCellView: NSTableCellView {
     let titleLabel = NSTextField(labelWithString: "")
     private let closeButton: NSButton
+    private var trackingArea: NSTrackingArea?
+    private var titleTrailingDefault: NSLayoutConstraint!
+    private var titleTrailingHover: NSLayoutConstraint!
     var onClose: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
@@ -233,6 +236,7 @@ class TabCellView: NSTableCellView {
 
         closeButton.bezelStyle = .inline
         closeButton.isBordered = false
+        closeButton.isHidden = true
         closeButton.target = self
         closeButton.action = #selector(closeTapped)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
@@ -240,10 +244,13 @@ class TabCellView: NSTableCellView {
         addSubview(titleLabel)
         addSubview(closeButton)
 
+        titleTrailingDefault = titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4)
+        titleTrailingHover = titleLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4)
+
         NSLayoutConstraint.activate([
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
+            titleTrailingDefault,
 
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -253,6 +260,33 @@ class TabCellView: NSTableCellView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        closeButton.isHidden = false
+        titleTrailingDefault.isActive = false
+        titleTrailingHover.isActive = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        closeButton.isHidden = true
+        titleTrailingHover.isActive = false
+        titleTrailingDefault.isActive = true
+    }
 
     @objc private func closeTapped() {
         onClose?()
