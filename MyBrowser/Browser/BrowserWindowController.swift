@@ -11,13 +11,6 @@ class BrowserWindowController: NSWindowController {
     private var activeTab: BrowserTab?
     private var subscriptions: [UUID: Set<AnyCancellable>] = [:]
 
-    private let addressField = NSTextField()
-
-    private static let backIdentifier = NSToolbarItem.Identifier("back")
-    private static let forwardIdentifier = NSToolbarItem.Identifier("forward")
-    private static let reloadIdentifier = NSToolbarItem.Identifier("reload")
-    private static let addressFieldIdentifier = NSToolbarItem.Identifier("addressField")
-
     convenience init() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
@@ -29,22 +22,33 @@ class BrowserWindowController: NSWindowController {
         window.setFrameAutosaveName("BrowserWindow")
         window.minSize = NSSize(width: 600, height: 400)
         window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
 
         self.init(window: window)
 
-        setupSplitView()
         setupToolbar()
+        setupSplitView()
         addNewTab(url: URL(string: "https://www.apple.com")!)
     }
 
     // MARK: - Setup
 
+    private func setupToolbar() {
+        let toolbar = NSToolbar(identifier: "BrowserToolbar")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        toolbar.showsBaselineSeparator = false
+        window?.toolbar = toolbar
+        window?.toolbarStyle = .unified
+    }
+
     private func setupSplitView() {
         tabSidebar.delegate = self
 
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: tabSidebar)
-        sidebarItem.minimumThickness = 180
-        sidebarItem.maximumThickness = 300
+        sidebarItem.minimumThickness = 200
+        sidebarItem.maximumThickness = 350
         sidebarItem.canCollapse = true
         splitViewController.addSplitViewItem(sidebarItem)
 
@@ -55,14 +59,6 @@ class BrowserWindowController: NSWindowController {
         splitViewController.addSplitViewItem(contentItem)
 
         window?.contentViewController = splitViewController
-    }
-
-    private func setupToolbar() {
-        let toolbar = NSToolbar(identifier: "BrowserToolbar")
-        toolbar.delegate = self
-        toolbar.displayMode = .iconOnly
-        window?.toolbar = toolbar
-        window?.toolbarStyle = .unified
     }
 
     // MARK: - Tab Management
@@ -90,7 +86,23 @@ class BrowserWindowController: NSWindowController {
             .receive(on: RunLoop.main)
             .sink { [weak self] url in
                 guard let self, self.activeTab?.id == tab.id else { return }
-                self.addressField.stringValue = url?.absoluteString ?? ""
+                self.tabSidebar.addressField.stringValue = url?.absoluteString ?? ""
+            }
+            .store(in: &cancellables)
+
+        tab.$canGoBack
+            .receive(on: RunLoop.main)
+            .sink { [weak self] canGoBack in
+                guard let self, self.activeTab?.id == tab.id else { return }
+                self.tabSidebar.backButton.isEnabled = canGoBack
+            }
+            .store(in: &cancellables)
+
+        tab.$canGoForward
+            .receive(on: RunLoop.main)
+            .sink { [weak self] canGoForward in
+                guard let self, self.activeTab?.id == tab.id else { return }
+                self.tabSidebar.forwardButton.isEnabled = canGoForward
             }
             .store(in: &cancellables)
 
@@ -121,7 +133,9 @@ class BrowserWindowController: NSWindowController {
             webView.trailingAnchor.constraint(equalTo: contentContainerView.trailingAnchor),
         ])
 
-        addressField.stringValue = tab.url?.absoluteString ?? ""
+        tabSidebar.addressField.stringValue = tab.url?.absoluteString ?? ""
+        tabSidebar.backButton.isEnabled = tab.canGoBack
+        tabSidebar.forwardButton.isEnabled = tab.canGoForward
         window?.title = tab.title
         tabSidebar.selectedTabIndex = index
     }
@@ -145,12 +159,12 @@ class BrowserWindowController: NSWindowController {
 
     // MARK: - Navigation
 
-    private func navigateToAddress() {
+    private func navigateToAddress(_ input: String) {
         guard let tab = activeTab else { return }
-        let input = addressField.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !input.isEmpty else { return }
+        let trimmed = input.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
 
-        if let url = urlFromInput(input) {
+        if let url = urlFromInput(trimmed) {
             tab.load(url)
         }
     }
@@ -176,78 +190,17 @@ class BrowserWindowController: NSWindowController {
         guard let active = activeTab, let index = tabs.firstIndex(where: { $0.id == active.id }) else { return }
         closeTab(at: index)
     }
-
-    @objc private func goBack(_ sender: Any?) {
-        activeTab?.webView.goBack()
-    }
-
-    @objc private func goForward(_ sender: Any?) {
-        activeTab?.webView.goForward()
-    }
-
-    @objc private func reload(_ sender: Any?) {
-        activeTab?.webView.reload()
-    }
-
-    @objc private func addressFieldAction(_ sender: NSTextField) {
-        navigateToAddress()
-    }
 }
 
 // MARK: - NSToolbarDelegate
 
 extension BrowserWindowController: NSToolbarDelegate {
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        switch itemIdentifier {
-        case Self.backIdentifier:
-            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            item.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back")
-            item.label = "Back"
-            item.target = self
-            item.action = #selector(goBack(_:))
-            return item
-
-        case Self.forwardIdentifier:
-            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            item.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Forward")
-            item.label = "Forward"
-            item.target = self
-            item.action = #selector(goForward(_:))
-            return item
-
-        case Self.reloadIdentifier:
-            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            item.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Reload")
-            item.label = "Reload"
-            item.target = self
-            item.action = #selector(reload(_:))
-            return item
-
-        case Self.addressFieldIdentifier:
-            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            addressField.placeholderString = "Enter URL or search"
-            addressField.font = .systemFont(ofSize: NSFont.systemFontSize)
-            addressField.target = self
-            addressField.action = #selector(addressFieldAction(_:))
-            addressField.lineBreakMode = .byTruncatingTail
-            addressField.usesSingleLineMode = true
-            addressField.cell?.isScrollable = true
-            item.view = addressField
-            item.minSize = NSSize(width: 200, height: 22)
-            item.maxSize = NSSize(width: 10000, height: 22)
-            return item
-
-        default:
-            return nil
-        }
-    }
-
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.backIdentifier, Self.forwardIdentifier, Self.reloadIdentifier, Self.addressFieldIdentifier]
+        []
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.backIdentifier, Self.forwardIdentifier, Self.reloadIdentifier, Self.addressFieldIdentifier]
+        []
     }
 }
 
@@ -264,6 +217,22 @@ extension BrowserWindowController: TabSidebarDelegate {
 
     func tabSidebar(_ sidebar: TabSidebarViewController, didRequestCloseTabAt index: Int) {
         closeTab(at: index)
+    }
+
+    func tabSidebarDidRequestGoBack(_ sidebar: TabSidebarViewController) {
+        activeTab?.webView.goBack()
+    }
+
+    func tabSidebarDidRequestGoForward(_ sidebar: TabSidebarViewController) {
+        activeTab?.webView.goForward()
+    }
+
+    func tabSidebarDidRequestReload(_ sidebar: TabSidebarViewController) {
+        activeTab?.webView.reload()
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didSubmitAddressInput input: String) {
+        navigateToAddress(input)
     }
 }
 
