@@ -5,7 +5,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
-        createNewWindow()
+
+        // Create the initial tab in the shared store
+        let tab = TabStore.shared.addTab(url: URL(string: "https://www.apple.com")!)
+
+        let wc = BrowserWindowController()
+        windowControllers.append(wc)
+        wc.showWindow(nil)
+        wc.selectTab(id: tab.id)
+        observeWindowClose(wc)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -13,9 +21,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func createNewWindow() {
+        let tab = TabStore.shared.addTab()
         let wc = BrowserWindowController()
         windowControllers.append(wc)
         wc.showWindow(nil)
+        wc.selectTab(id: tab.id)
+        observeWindowClose(wc)
+    }
+
+    private func observeWindowClose(_ wc: BrowserWindowController) {
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: wc.window,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self else { return }
+            self.windowControllers.removeAll { $0.window === notification.object as? NSWindow }
+        }
     }
 
     private func setupMainMenu() {

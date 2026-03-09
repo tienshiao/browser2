@@ -1,3 +1,4 @@
+import AppKit
 import WebKit
 import Combine
 
@@ -11,10 +12,18 @@ class BrowserTab {
     @Published var canGoBack: Bool = false
     @Published var canGoForward: Bool = false
     @Published var estimatedProgress: Double = 0
+    @Published var latestSnapshot: NSImage?
 
     init(configuration: WKWebViewConfiguration = WKWebViewConfiguration()) {
         self.webView = WKWebView(frame: .zero, configuration: configuration)
         setupObservers()
+    }
+
+    func takeSnapshot(completion: ((NSImage?) -> Void)? = nil) {
+        webView.takeSnapshot(with: nil) { [weak self] image, _ in
+            self?.latestSnapshot = image
+            completion?(image)
+        }
     }
 
     private func setupObservers() {
