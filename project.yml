@@ -1,0 +1,16 @@
+name: MyBrowser
+options:
+  deploymentTarget:
+    macOS: "14.0"
+targets:
+  MyBrowser:
+    type: application
+    platform: macOS
+    sources:
+      - MyBrowser
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mybrowser.app
+        INFOPLIST_FILE: MyBrowser/Resources/Info.plist
+        SWIFT_VERSION: "5.10"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
