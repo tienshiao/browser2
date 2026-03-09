@@ -11,7 +11,11 @@ class BrowserWindowController: NSWindowController {
     private let tabSidebar = TabSidebarViewController()
     private let contentContainerView = NSView()
     private var sidebarItem: NSSplitViewItem!
+    private var contentItem: NSSplitViewItem!
     private var sidebarCollapseObservation: NSKeyValueObservation?
+    private var sidebarAutoHides = false
+    private var sidebarOpenedByHover = false
+    private var autoHideWorkItem: DispatchWorkItem?
 
     private var selectedTabID: UUID?
     private var activeTabSubscriptions = Set<AnyCancellable>()
@@ -94,17 +98,122 @@ class BrowserWindowController: NSWindowController {
         let contentVC = NSViewController()
         contentVC.view = contentContainerView
         contentContainerView.wantsLayer = true
-        let contentItem = NSSplitViewItem(viewController: contentVC)
+        contentItem = NSSplitViewItem(viewController: contentVC)
         splitViewController.addSplitViewItem(contentItem)
 
         sidebarCollapseObservation = sidebarItem.observe(\.isCollapsed, options: [.new]) { [weak self] _, change in
             guard let self, let collapsed = change.newValue else { return }
-            self.window?.standardWindowButton(.closeButton)?.isHidden = collapsed
-            self.window?.standardWindowButton(.miniaturizeButton)?.isHidden = collapsed
-            self.window?.standardWindowButton(.zoomButton)?.isHidden = collapsed
+            if collapsed {
+                self.sidebarOpenedByHover = false
+                self.setTrafficLightsHidden(true, animated: false)
+            } else {
+                self.setTrafficLightsHidden(false, animated: true)
+            }
         }
 
         window?.contentViewController = splitViewController
+
+        setupEdgeHoverTracking()
+    }
+
+    private func setTrafficLightsHidden(_ hidden: Bool, animated: Bool) {
+        let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        if hidden {
+            for type in buttons {
+                window?.standardWindowButton(type)?.isHidden = true
+                window?.standardWindowButton(type)?.alphaValue = 0
+            }
+        } else {
+            for type in buttons {
+                let button = window?.standardWindowButton(type)
+                button?.alphaValue = 0
+                button?.isHidden = false
+            }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = animated ? 0.25 : 0
+                for type in buttons {
+                    window?.standardWindowButton(type)?.animator().alphaValue = 1
+                }
+            }
+        }
+    }
+
+    private func setupEdgeHoverTracking() {
+        // Thin invisible view on the left edge for hover detection
+        let edgeView = NSView()
+        edgeView.translatesAutoresizingMaskIntoConstraints = false
+        splitViewController.view.addSubview(edgeView)
+        NSLayoutConstraint.activate([
+            edgeView.leadingAnchor.constraint(equalTo: splitViewController.view.leadingAnchor),
+            edgeView.topAnchor.constraint(equalTo: splitViewController.view.topAnchor),
+            edgeView.bottomAnchor.constraint(equalTo: splitViewController.view.bottomAnchor),
+            edgeView.widthAnchor.constraint(equalToConstant: 5),
+        ])
+        let edgeArea = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: ["zone": "edge"]
+        )
+        edgeView.addTrackingArea(edgeArea)
+
+        // Tracking area on sidebar view for exit detection
+        let sidebarArea = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: ["zone": "sidebar"]
+        )
+        tabSidebar.view.addTrackingArea(sidebarArea)
+    }
+
+    private func toggleSidebarAutoHide() {
+        autoHideWorkItem?.cancel()
+        autoHideWorkItem = nil
+        sidebarOpenedByHover = false
+        sidebarAutoHides.toggle()
+
+        if #available(macOS 26.0, *) {
+            contentItem.automaticallyAdjustsSafeAreaInsets = sidebarAutoHides
+        }
+
+        if sidebarAutoHides {
+            // Switch to auto-hide: collapse the sidebar
+            if !sidebarItem.isCollapsed {
+                splitViewController.toggleSidebar(nil)
+            }
+        } else {
+            // Switch to pinned: show the sidebar
+            if sidebarItem.isCollapsed {
+                splitViewController.toggleSidebar(nil)
+            }
+        }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard let userInfo = event.trackingArea?.userInfo,
+              let zone = userInfo["zone"] as? String else { return }
+        if zone == "edge" && sidebarAutoHides && sidebarItem.isCollapsed {
+            sidebarOpenedByHover = true
+            splitViewController.toggleSidebar(nil)
+        } else if zone == "sidebar" && sidebarOpenedByHover {
+            autoHideWorkItem?.cancel()
+            autoHideWorkItem = nil
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard let userInfo = event.trackingArea?.userInfo,
+              let zone = userInfo["zone"] as? String else { return }
+        if zone == "sidebar" && sidebarOpenedByHover {
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self, self.sidebarOpenedByHover else { return }
+                self.sidebarOpenedByHover = false
+                self.splitViewController.toggleSidebar(nil)
+            }
+            autoHideWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
+        }
     }
 
     private func setupFindBar() {
@@ -418,6 +527,10 @@ class BrowserWindowController: NSWindowController {
 
     // MARK: - Actions
 
+    @objc func toggleSidebarMode(_ sender: Any?) {
+        toggleSidebarAutoHide()
+    }
+
     @objc func newTab(_ sender: Any?) {
         let tab = store.addTab(afterTabID: selectedTabID)
         selectTab(id: tab.id)
@@ -542,7 +655,7 @@ extension BrowserWindowController: TabSidebarDelegate {
     }
 
     func tabSidebarDidRequestToggleSidebar(_ sidebar: TabSidebarViewController) {
-        splitViewController.toggleSidebar(nil)
+        toggleSidebarAutoHide()
     }
 }
 

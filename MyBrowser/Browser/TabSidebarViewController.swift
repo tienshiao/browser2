@@ -117,7 +117,7 @@ class TabSidebarViewController: NSViewController {
         NSLayoutConstraint.activate([
             // Sidebar toggle button: in title bar area, right of traffic lights
             sidebarToggleButton.topAnchor.constraint(equalTo: container.topAnchor, constant: 7),
-            sidebarToggleButton.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 72),
+            sidebarToggleButton.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 74),
 
             // Nav buttons: pinned to top of view (title bar area), right-aligned
             navStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 7),
