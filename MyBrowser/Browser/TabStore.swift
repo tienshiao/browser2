@@ -186,6 +186,15 @@ class TabStore {
             }
             .store(in: &cancellables)
 
+        tab.$favicon
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self, weak tab] _ in
+                guard let self, let tab, let index = self.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+                self.notifyObservers { $0.tabStoreDidUpdateTab(tab, at: index) }
+            }
+            .store(in: &cancellables)
+
         tabSubscriptions[tab.id] = cancellables
     }
 }

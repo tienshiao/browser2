@@ -90,7 +90,7 @@ class TabSidebarViewController: NSViewController {
         tableView.headerView = nil
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.rowHeight = 32
+        tableView.rowHeight = 36
         tableView.style = .sourceList
 
         scrollView.contentView = DraggableClipView()
@@ -214,6 +214,7 @@ extension TabSidebarViewController: NSTableViewDelegate {
         let tab = tabs[row]
         cell.titleLabel.stringValue = tab.title
         cell.toolTip = tab.title
+        cell.updateFavicon(tab.favicon)
         cell.onClose = { [weak self] in
             guard let self else { return }
             self.delegate?.tabSidebar(self, didRequestCloseTabAt: row)
@@ -232,10 +233,12 @@ extension TabSidebarViewController: NSTableViewDelegate {
 
 class TabCellView: NSTableCellView {
     let titleLabel = NSTextField(labelWithString: "")
+    let faviconImageView = NSImageView()
     private let closeButton: NSButton
     private var trackingArea: NSTrackingArea?
     private var titleTrailingDefault: NSLayoutConstraint!
     private var titleTrailingHover: NSLayoutConstraint!
+    private var titleLeadingToFavicon: NSLayoutConstraint!
     var onClose: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
@@ -245,6 +248,10 @@ class TabCellView: NSTableCellView {
             action: nil
         )
         super.init(frame: frameRect)
+
+        faviconImageView.imageScaling = .scaleProportionallyUpOrDown
+        faviconImageView.translatesAutoresizingMaskIntoConstraints = false
+        faviconImageView.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
 
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -256,14 +263,21 @@ class TabCellView: NSTableCellView {
         closeButton.action = #selector(closeTapped)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
 
+        addSubview(faviconImageView)
         addSubview(titleLabel)
         addSubview(closeButton)
 
         titleTrailingDefault = titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4)
         titleTrailingHover = titleLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4)
+        titleLeadingToFavicon = titleLabel.leadingAnchor.constraint(equalTo: faviconImageView.trailingAnchor, constant: 8)
 
         NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            faviconImageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            faviconImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            faviconImageView.widthAnchor.constraint(equalToConstant: 16),
+            faviconImageView.heightAnchor.constraint(equalToConstant: 16),
+
+            titleLeadingToFavicon,
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             titleTrailingDefault,
 
@@ -301,6 +315,10 @@ class TabCellView: NSTableCellView {
         closeButton.isHidden = true
         titleTrailingHover.isActive = false
         titleTrailingDefault.isActive = true
+    }
+
+    func updateFavicon(_ image: NSImage?) {
+        faviconImageView.image = image ?? NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
     }
 
     @objc private func closeTapped() {

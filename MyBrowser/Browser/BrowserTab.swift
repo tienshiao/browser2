@@ -13,6 +13,10 @@ class BrowserTab {
     @Published var canGoForward: Bool = false
     @Published var estimatedProgress: Double = 0
     @Published var latestSnapshot: NSImage?
+    @Published var favicon: NSImage?
+
+    private var faviconCancellables = Set<AnyCancellable>()
+    private var previousHost: String?
 
     init(id: UUID = UUID(), configuration: WKWebViewConfiguration = WKWebViewConfiguration()) {
         self.id = id
@@ -57,6 +61,52 @@ class BrowserTab {
 
         webView.publisher(for: \.estimatedProgress)
             .assign(to: &$estimatedProgress)
+
+        webView.publisher(for: \.url)
+            .compactMap { $0?.host }
+            .removeDuplicates()
+            .sink { [weak self] host in
+                guard let self else { return }
+                if self.previousHost != nil, self.previousHost != host {
+                    self.favicon = nil
+                }
+                self.previousHost = host
+            }
+            .store(in: &faviconCancellables)
+
+        $isLoading
+            .removeDuplicates()
+            .filter { !$0 }
+            .dropFirst()
+            .sink { [weak self] _ in self?.fetchFavicon() }
+            .store(in: &faviconCancellables)
+    }
+
+    private func fetchFavicon() {
+        let js = "document.querySelector(\"link[rel~='icon'], link[rel='shortcut icon']\")?.href"
+        webView.evaluateJavaScript(js) { [weak self] result, _ in
+            guard let self else { return }
+            if let urlString = result as? String, let url = URL(string: urlString) {
+                self.downloadFavicon(from: url)
+            } else if let pageURL = self.url,
+                      let scheme = pageURL.scheme,
+                      let host = pageURL.host {
+                let fallback = URL(string: "\(scheme)://\(host)/favicon.ico")!
+                self.downloadFavicon(from: fallback)
+            }
+        }
+    }
+
+    private func downloadFavicon(from url: URL) {
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, _ in
+            guard let data,
+                  let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200,
+                  let image = NSImage(data: data) else { return }
+            DispatchQueue.main.async {
+                self?.favicon = image
+            }
+        }.resume()
     }
 
     func load(_ url: URL) {
