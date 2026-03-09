@@ -18,9 +18,6 @@ class CommandPaletteView: NSView {
     private let textField = CommandPaletteTextField()
     private let box = NSVisualEffectView()
 
-    /// The region (in window coordinates) where clicks pass through to the sidebar.
-    var sidebarPassthroughFrame: NSRect = .zero
-
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setup()
@@ -56,8 +53,8 @@ class CommandPaletteView: NSView {
         box.addSubview(textField)
 
         NSLayoutConstraint.activate([
-            box.centerXAnchor.constraint(equalTo: centerXAnchor),
-            box.topAnchor.constraint(equalTo: topAnchor, constant: 200),
+            box.centerXAnchor.constraint(equalTo: safeAreaLayoutGuide.centerXAnchor),
+            box.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 200),
             box.widthAnchor.constraint(equalToConstant: 500),
 
             textField.topAnchor.constraint(equalTo: box.topAnchor, constant: 12),
@@ -65,15 +62,6 @@ class CommandPaletteView: NSView {
             textField.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 16),
             textField.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -16),
         ])
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        // Convert point to window coordinates and pass through clicks in the sidebar region
-        let windowPoint = convert(point, to: nil)
-        if sidebarPassthroughFrame.contains(windowPoint) {
-            return nil
-        }
-        return super.hitTest(point)
     }
 
     override func mouseDown(with event: NSEvent) {

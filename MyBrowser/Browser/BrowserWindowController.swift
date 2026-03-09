@@ -94,6 +94,7 @@ class BrowserWindowController: NSWindowController {
     private var lastFindQuery = ""
 
     private var commandPaletteView: CommandPaletteView?
+    private var splitScrimView: NSView?
 
     private var store: TabStore { TabStore.shared }
 
@@ -616,23 +617,33 @@ class BrowserWindowController: NSWindowController {
     }
 
     private func showCommandPalette() {
-        guard commandPaletteView == nil, let contentView = window?.contentView else { return }
+        guard commandPaletteView == nil else { return }
         let palette = CommandPaletteView()
         palette.delegate = self
         commandPaletteView = palette
 
-        // Let the sidebar region pass through clicks so tabs remain interactive
-        if !sidebarItem.isCollapsed {
-            let sidebarFrame = tabSidebar.view.convert(tabSidebar.view.bounds, to: nil)
-            palette.sidebarPassthroughFrame = sidebarFrame
-        }
+        // Add a scrim behind the sidebar and content so it shows through the translucent sidebar
+        let scrim = NSView()
+        scrim.wantsLayer = true
+        scrim.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.3).cgColor
+        scrim.translatesAutoresizingMaskIntoConstraints = false
+        splitViewController.view.addSubview(scrim, positioned: .below, relativeTo: splitViewController.view.subviews.first)
+        NSLayoutConstraint.activate([
+            scrim.topAnchor.constraint(equalTo: splitViewController.view.topAnchor),
+            scrim.bottomAnchor.constraint(equalTo: splitViewController.view.bottomAnchor),
+            scrim.leadingAnchor.constraint(equalTo: splitViewController.view.leadingAnchor),
+            scrim.trailingAnchor.constraint(equalTo: splitViewController.view.trailingAnchor),
+        ])
+        splitScrimView = scrim
 
-        palette.show(in: contentView)
+        palette.show(in: contentContainerView)
     }
 
     private func dismissCommandPalette() {
         commandPaletteView?.removeFromSuperview()
         commandPaletteView = nil
+        splitScrimView?.removeFromSuperview()
+        splitScrimView = nil
     }
 
     private func deselectAllTabs() {
