@@ -14,6 +14,7 @@ class BrowserTab {
     @Published var estimatedProgress: Double = 0
     @Published var latestSnapshot: NSImage?
     @Published var favicon: NSImage?
+    private(set) var faviconURL: URL?
 
     private var faviconCancellables = Set<AnyCancellable>()
     private var previousHost: String?
@@ -24,9 +25,13 @@ class BrowserTab {
         setupObservers()
     }
 
-    convenience init(id: UUID, title: String, archivedInteractionState: Data?, fallbackURL: URL?) {
+    convenience init(id: UUID, title: String, archivedInteractionState: Data?, fallbackURL: URL?, faviconURL: URL? = nil) {
         self.init(id: id)
         self.title = title
+        if let faviconURL {
+            self.faviconURL = faviconURL
+            downloadFavicon(from: faviconURL)
+        }
         if let archivedInteractionState,
            let state = try? NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(archivedInteractionState) {
             webView.interactionState = state
@@ -69,6 +74,7 @@ class BrowserTab {
                 guard let self else { return }
                 if self.previousHost != nil, self.previousHost != host {
                     self.favicon = nil
+                    self.faviconURL = nil
                 }
                 self.previousHost = host
             }
@@ -104,6 +110,7 @@ class BrowserTab {
                   httpResponse.statusCode == 200,
                   let image = NSImage(data: data) else { return }
             DispatchQueue.main.async {
+                self?.faviconURL = url
                 self?.favicon = image
             }
         }.resume()

@@ -26,6 +26,7 @@ class TabStore {
         let url: URL?
         let title: String
         let interactionState: Data?
+        let faviconURL: URL?
     }
 
     private struct BrowserSession: Codable {
@@ -57,7 +58,7 @@ class TabStore {
             if let state = tab.webView.interactionState {
                 stateData = try? NSKeyedArchiver.archivedData(withRootObject: state, requiringSecureCoding: false)
             }
-            return TabSession(id: tab.id, url: tab.url, title: tab.title, interactionState: stateData)
+            return TabSession(id: tab.id, url: tab.url, title: tab.title, interactionState: stateData, faviconURL: tab.faviconURL)
         }
         let session = BrowserSession(tabs: tabSessions, selectedTabID: selectedTabID)
         if let data = try? JSONEncoder().encode(session) {
@@ -75,7 +76,8 @@ class TabStore {
                 id: tabSession.id,
                 title: tabSession.title,
                 archivedInteractionState: tabSession.interactionState,
-                fallbackURL: tabSession.url
+                fallbackURL: tabSession.url,
+                faviconURL: tabSession.faviconURL
             )
             tabs.append(tab)
             subscribeToTab(tab)
