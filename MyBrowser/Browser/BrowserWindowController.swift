@@ -6,6 +6,68 @@ extension Notification.Name {
     static let webViewOwnershipChanged = Notification.Name("webViewOwnershipChanged")
 }
 
+/// Transparent view that sits atop the content area to enable window dragging.
+/// Initiates a window drag on mouse-down; forwards clicks if no drag occurred.
+class WindowDragView: NSView {
+    override var mouseDownCanMoveWindow: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let window else { return }
+        let startLocation = event.locationInWindow
+
+        // Enter a local event loop to detect drag vs click
+        var didDrag = false
+        let initialFrame = window.frame
+
+        window.trackEvents(matching: [.leftMouseDragged, .leftMouseUp], timeout: .infinity, mode: .default) { trackedEvent, stop in
+            guard let trackedEvent else { stop.pointee = true; return }
+
+            if trackedEvent.type == .leftMouseUp {
+                stop.pointee = true
+                return
+            }
+
+            // leftMouseDragged
+            let delta = NSPoint(
+                x: trackedEvent.locationInWindow.x - startLocation.x,
+                y: trackedEvent.locationInWindow.y - startLocation.y
+            )
+            var newOrigin = window.frame.origin
+            newOrigin.x += delta.x
+            newOrigin.y += delta.y
+            window.setFrameOrigin(newOrigin)
+            didDrag = true
+        }
+
+        if !didDrag {
+            // It was a click — forward full click sequence to the view underneath
+            guard let superview else { return }
+            let superPoint = superview.convert(event.locationInWindow, from: nil)
+            for sibling in superview.subviews.reversed() where sibling !== self {
+                if let target = sibling.hitTest(superPoint) {
+                    target.mouseDown(with: event)
+                    // Synthesize a matching mouseUp
+                    let mouseUp = NSEvent.mouseEvent(
+                        with: .leftMouseUp,
+                        location: event.locationInWindow,
+                        modifierFlags: event.modifierFlags,
+                        timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: event.windowNumber,
+                        context: nil,
+                        eventNumber: 0,
+                        clickCount: event.clickCount,
+                        pressure: 0
+                    )
+                    if let mouseUp {
+                        target.mouseUp(with: mouseUp)
+                    }
+                    return
+                }
+            }
+        }
+    }
+}
+
 class BrowserWindowController: NSWindowController {
     private let splitViewController = NSSplitViewController()
     private let tabSidebar = TabSidebarViewController()
@@ -24,6 +86,7 @@ class BrowserWindowController: NSWindowController {
     private var snapshotSubscription: AnyCancellable?
 
     private let findBar = FindBarView()
+    private let dragHandle = WindowDragView()
     private var findBarTopConstraint: NSLayoutConstraint?
     private var webViewTopConstraint: NSLayoutConstraint?
     private var findMatchCount = 0
@@ -57,6 +120,7 @@ class BrowserWindowController: NSWindowController {
 
         setupToolbar()
         setupSplitView()
+        setupDragHandle()
         setupFindBar()
 
         window.delegate = self
@@ -216,6 +280,18 @@ class BrowserWindowController: NSWindowController {
             autoHideWorkItem = workItem
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
         }
+    }
+
+    private func setupDragHandle() {
+        dragHandle.wantsLayer = true
+        dragHandle.translatesAutoresizingMaskIntoConstraints = false
+        contentContainerView.addSubview(dragHandle)
+        NSLayoutConstraint.activate([
+            dragHandle.topAnchor.constraint(equalTo: contentContainerView.topAnchor),
+            dragHandle.leadingAnchor.constraint(equalTo: contentContainerView.leadingAnchor),
+            dragHandle.trailingAnchor.constraint(equalTo: contentContainerView.trailingAnchor),
+            dragHandle.heightAnchor.constraint(equalToConstant: 38),
+        ])
     }
 
     private func setupFindBar() {
@@ -423,7 +499,7 @@ class BrowserWindowController: NSWindowController {
         webView.uiDelegate = self
 
         webView.translatesAutoresizingMaskIntoConstraints = false
-        contentContainerView.addSubview(webView)
+        contentContainerView.addSubview(webView, positioned: .below, relativeTo: dragHandle)
 
         let topAnchor = findBar.isHidden ? contentContainerView.topAnchor : findBar.bottomAnchor
         webViewTopConstraint = webView.topAnchor.constraint(equalTo: topAnchor)
@@ -452,7 +528,7 @@ class BrowserWindowController: NSWindowController {
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.alphaValue = 0.5
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        contentContainerView.addSubview(imageView)
+        contentContainerView.addSubview(imageView, positioned: .below, relativeTo: dragHandle)
 
         let topAnchor = findBar.isHidden ? contentContainerView.topAnchor : findBar.bottomAnchor
         webViewTopConstraint = imageView.topAnchor.constraint(equalTo: topAnchor)
@@ -478,7 +554,7 @@ class BrowserWindowController: NSWindowController {
     }
 
     private func removeContentViews() {
-        for subview in contentContainerView.subviews where subview !== findBar {
+        for subview in contentContainerView.subviews where subview !== findBar && subview !== dragHandle {
             subview.removeFromSuperview()
         }
         snapshotImageView = nil
