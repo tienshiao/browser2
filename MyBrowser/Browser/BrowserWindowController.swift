@@ -17,6 +17,13 @@ class BrowserWindowController: NSWindowController {
     private var ownsWebView = false
     private var snapshotSubscription: AnyCancellable?
 
+    private let findBar = FindBarView()
+    private var findBarTopConstraint: NSLayoutConstraint?
+    private var webViewTopConstraint: NSLayoutConstraint?
+    private var findMatchCount = 0
+    private var findMatchIndex = 0
+    private var lastFindQuery = ""
+
     private var store: TabStore { TabStore.shared }
 
     private var selectedTab: BrowserTab? {
@@ -42,6 +49,7 @@ class BrowserWindowController: NSWindowController {
 
         setupToolbar()
         setupSplitView()
+        setupFindBar()
 
         window.delegate = self
 
@@ -88,6 +96,131 @@ class BrowserWindowController: NSWindowController {
         splitViewController.addSplitViewItem(contentItem)
 
         window?.contentViewController = splitViewController
+    }
+
+    private func setupFindBar() {
+        findBar.delegate = self
+        findBar.isHidden = true
+        findBar.translatesAutoresizingMaskIntoConstraints = false
+        contentContainerView.addSubview(findBar)
+
+        findBarTopConstraint = findBar.topAnchor.constraint(equalTo: contentContainerView.topAnchor)
+        NSLayoutConstraint.activate([
+            findBarTopConstraint!,
+            findBar.leadingAnchor.constraint(equalTo: contentContainerView.leadingAnchor),
+            findBar.trailingAnchor.constraint(equalTo: contentContainerView.trailingAnchor),
+        ])
+    }
+
+    // MARK: - Find Bar Actions
+
+    @objc func showFindBar(_ sender: Any?) {
+        findBar.isHidden = false
+        updateWebViewTopConstraint()
+        findBar.focus()
+    }
+
+    @objc func findNext(_ sender: Any?) {
+        if findBar.isHidden { showFindBar(sender) }
+        let text = findBar.searchField.stringValue
+        guard !text.isEmpty else { return }
+        performFind(text, backwards: false)
+    }
+
+    @objc func findPrevious(_ sender: Any?) {
+        if findBar.isHidden { showFindBar(sender) }
+        let text = findBar.searchField.stringValue
+        guard !text.isEmpty else { return }
+        performFind(text, backwards: true)
+    }
+
+    @objc func dismissFindBar(_ sender: Any?) {
+        findBar.isHidden = true
+        findBar.searchField.stringValue = ""
+        findBar.updateResultLabel("")
+        lastFindQuery = ""
+        findMatchCount = 0
+        findMatchIndex = 0
+        updateWebViewTopConstraint()
+        window?.makeFirstResponder(selectedTab?.webView)
+    }
+
+    private func performFind(_ text: String, backwards: Bool) {
+        guard let webView = selectedTab?.webView else { return }
+
+        let isNewQuery = text != lastFindQuery
+        if isNewQuery {
+            lastFindQuery = text
+            findMatchIndex = 0
+            countMatches(for: text, in: webView)
+        }
+
+        let config = WKFindConfiguration()
+        config.backwards = backwards
+        config.wraps = true
+        webView.find(text, configuration: config) { [weak self] result in
+            guard let self else { return }
+            if result.matchFound {
+                if !isNewQuery {
+                    if backwards {
+                        self.findMatchIndex -= 1
+                        if self.findMatchIndex < 1 { self.findMatchIndex = self.findMatchCount }
+                    } else {
+                        self.findMatchIndex += 1
+                        if self.findMatchIndex > self.findMatchCount { self.findMatchIndex = 1 }
+                    }
+                }
+                self.updateFindLabel()
+            } else {
+                self.findMatchCount = 0
+                self.findMatchIndex = 0
+                self.findBar.updateResultLabel("Not found")
+            }
+        }
+    }
+
+    private func countMatches(for text: String, in webView: WKWebView) {
+        let escaped = text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        let js = """
+        (function() {
+            var t = '\(escaped)'.toLowerCase();
+            var body = document.body.innerText.toLowerCase();
+            var count = 0, pos = 0;
+            while ((pos = body.indexOf(t, pos)) !== -1) { count++; pos += t.length; }
+            return count;
+        })()
+        """
+        webView.evaluateJavaScript(js) { [weak self] result, _ in
+            guard let self, self.lastFindQuery == text else { return }
+            self.findMatchCount = (result as? Int) ?? 0
+            if self.findMatchCount > 0 {
+                self.findMatchIndex = 1
+            }
+            self.updateFindLabel()
+        }
+    }
+
+    private func updateFindLabel() {
+        if findMatchCount > 0 {
+            findBar.updateResultLabel("\(findMatchIndex) of \(findMatchCount)")
+        } else {
+            findBar.updateResultLabel("Not found")
+        }
+    }
+
+    private func updateWebViewTopConstraint() {
+        webViewTopConstraint?.isActive = false
+        if let webView = contentContainerView.subviews.first(where: { $0 is WKWebView || $0 is NSImageView }) {
+            if findBar.isHidden {
+                webViewTopConstraint = webView.topAnchor.constraint(equalTo: contentContainerView.topAnchor)
+            } else {
+                webViewTopConstraint = webView.topAnchor.constraint(equalTo: findBar.bottomAnchor)
+            }
+            webViewTopConstraint?.isActive = true
+        }
     }
 
     // MARK: - Tab Selection & WebView Ownership
@@ -169,8 +302,11 @@ class BrowserWindowController: NSWindowController {
 
         webView.translatesAutoresizingMaskIntoConstraints = false
         contentContainerView.addSubview(webView)
+
+        let topAnchor = findBar.isHidden ? contentContainerView.topAnchor : findBar.bottomAnchor
+        webViewTopConstraint = webView.topAnchor.constraint(equalTo: topAnchor)
         NSLayoutConstraint.activate([
-            webView.topAnchor.constraint(equalTo: contentContainerView.topAnchor),
+            webViewTopConstraint!,
             webView.bottomAnchor.constraint(equalTo: contentContainerView.bottomAnchor),
             webView.leadingAnchor.constraint(equalTo: contentContainerView.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: contentContainerView.trailingAnchor),
@@ -195,8 +331,11 @@ class BrowserWindowController: NSWindowController {
         imageView.alphaValue = 0.5
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentContainerView.addSubview(imageView)
+
+        let topAnchor = findBar.isHidden ? contentContainerView.topAnchor : findBar.bottomAnchor
+        webViewTopConstraint = imageView.topAnchor.constraint(equalTo: topAnchor)
         NSLayoutConstraint.activate([
-            imageView.topAnchor.constraint(equalTo: contentContainerView.topAnchor),
+            webViewTopConstraint!,
             imageView.bottomAnchor.constraint(equalTo: contentContainerView.bottomAnchor),
             imageView.leadingAnchor.constraint(equalTo: contentContainerView.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: contentContainerView.trailingAnchor),
@@ -217,10 +356,11 @@ class BrowserWindowController: NSWindowController {
     }
 
     private func removeContentViews() {
-        for subview in contentContainerView.subviews {
+        for subview in contentContainerView.subviews where subview !== findBar {
             subview.removeFromSuperview()
         }
         snapshotImageView = nil
+        webViewTopConstraint = nil
         ownsWebView = false
     }
 
@@ -413,6 +553,18 @@ extension BrowserWindowController: TabStoreObserver {
 
     func tabStoreDidUpdateTab(_ tab: BrowserTab, at index: Int) {
         tabSidebar.reloadTab(at: index)
+    }
+}
+
+// MARK: - FindBarDelegate
+
+extension BrowserWindowController: FindBarDelegate {
+    func findBar(_ bar: FindBarView, searchFor text: String, backwards: Bool) {
+        performFind(text, backwards: backwards)
+    }
+
+    func findBarDidDismiss(_ bar: FindBarView) {
+        dismissFindBar(nil)
     }
 }
 
