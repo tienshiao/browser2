@@ -45,10 +45,11 @@ class DraggableTableView: NSTableView {
 class DraggableScrollView: NSScrollView {
     override var mouseDownCanMoveWindow: Bool { true }
 
-    var onScrollWheel: ((NSEvent) -> Void)?
+    /// Return `true` to consume the event (suppress vertical scrolling).
+    var onScrollWheel: ((NSEvent) -> Bool)?
 
     override func scrollWheel(with event: NSEvent) {
-        onScrollWheel?(event)
+        if onScrollWheel?(event) == true { return }
         super.scrollWheel(with: event)
     }
 }
@@ -299,7 +300,7 @@ class TabSidebarViewController: NSViewController {
             sv.hasVerticalScroller = true
             sv.horizontalScrollElasticity = .none
             sv.drawsBackground = false
-            sv.onScrollWheel = { [weak self] in self?.handleSpaceSwipe($0) }
+            sv.onScrollWheel = { [weak self] in self?.handleSpaceSwipe($0) ?? false }
 
             pageStripView.addSubview(sv)
             pageScrollViews.append(sv)
@@ -508,8 +509,10 @@ class TabSidebarViewController: NSViewController {
     private var isTrackingHorizontalSwipe = false
     private var swipeStartTintColor: NSColor?
 
-    private func handleSpaceSwipe(_ event: NSEvent) {
-        guard event.phase != [] else { return }
+    /// Returns `true` when the event is consumed by horizontal swipe handling.
+    @discardableResult
+    private func handleSpaceSwipe(_ event: NSEvent) -> Bool {
+        guard event.phase != [] else { return false }
 
         if event.phase == .began {
             if isAnimatingSwipe { isAnimatingSwipe = false }
@@ -517,11 +520,11 @@ class TabSidebarViewController: NSViewController {
             isTrackingHorizontalSwipe = false
         }
 
-        guard !isAnimatingSwipe else { return }
+        guard !isAnimatingSwipe else { return true }
 
         if !isTrackingHorizontalSwipe {
             guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY),
-                  event.scrollingDeltaX != 0 else { return }
+                  event.scrollingDeltaX != 0 else { return false }
             isTrackingHorizontalSwipe = true
             swipeStartTintColor = tintColor
         }
@@ -529,11 +532,12 @@ class TabSidebarViewController: NSViewController {
         if event.phase == .ended || event.phase == .cancelled {
             isTrackingHorizontalSwipe = false
             handleSwipeEnd()
-            return
+            return true
         }
 
         swipeAccumulatedX += event.scrollingDeltaX
         updateStripPosition()
+        return true
     }
 
     private func updateStripPosition() {
