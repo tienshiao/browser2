@@ -66,8 +66,10 @@ private let tabReorderPasteboardType = NSPasteboard.PasteboardType("com.mybrowse
 class TabSidebarViewController: NSViewController {
     weak var delegate: TabSidebarDelegate?
 
+    // Active page views — updated by updateActivePage()
     private(set) var tableView = DraggableTableView()
-    private let scrollView = DraggableScrollView()
+    private var scrollView = DraggableScrollView()
+
     private(set) var addressField = NSTextField()
     private(set) var backButton = NSButton()
     private(set) var forwardButton = NSButton()
@@ -80,7 +82,17 @@ class TabSidebarViewController: NSViewController {
     private var addSpaceButton = NSButton()
     private var isAnimatingSwipe = false
 
-    var activeSpaceID: UUID?
+    // Page strip: all spaces laid out side-by-side, clipped by pageClipView
+    private let pageClipView = NSView()
+    private let pageStripView = NSView()
+    private var pageScrollViews: [DraggableScrollView] = []
+    private var pageTableViews: [DraggableTableView] = []
+    private var pageSpaceIDs: [UUID] = []
+    private var activePageIndex = 0
+
+    var activeSpaceID: UUID? {
+        didSet { updateActivePage() }
+    }
 
     var tabs: [BrowserTab] = [] {
         didSet {
@@ -92,7 +104,7 @@ class TabSidebarViewController: NSViewController {
         didSet {
             view.wantsLayer = true
             if let color = tintColor {
-                view.layer?.backgroundColor = color.withAlphaComponent(0.05).cgColor
+                view.layer?.backgroundColor = color.withAlphaComponent(0.1).cgColor
             } else {
                 view.layer?.backgroundColor = nil
             }
@@ -134,24 +146,6 @@ class TabSidebarViewController: NSViewController {
         addressField.cell?.isScrollable = true
         addressField.bezelStyle = .roundedBezel
         addressField.translatesAutoresizingMaskIntoConstraints = false
-
-        // Tab list
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TabColumn"))
-        tableView.addTableColumn(column)
-        tableView.headerView = nil
-        tableView.dataSource = self
-        tableView.delegate = self
-        tableView.rowHeight = 36
-        tableView.style = .sourceList
-        tableView.registerForDraggedTypes([tabReorderPasteboardType])
-        tableView.draggingDestinationFeedbackStyle = .sourceList
-
-        scrollView.contentView = DraggableClipView()
-        scrollView.documentView = tableView
-        scrollView.hasVerticalScroller = true
-        scrollView.horizontalScrollElasticity = .none
-        scrollView.drawsBackground = false
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         // New Tab button (styled like a tab cell)
         let newTabButton = HoverButton(frame: .zero)
@@ -213,11 +207,17 @@ class TabSidebarViewController: NSViewController {
             addSpaceButton.heightAnchor.constraint(equalToConstant: 24),
         ])
 
+        // Page clip view (clips the horizontal page strip)
+        pageClipView.wantsLayer = true
+        pageClipView.layer?.masksToBounds = true
+        pageClipView.translatesAutoresizingMaskIntoConstraints = false
+        pageClipView.addSubview(pageStripView)
+
         container.addSubview(sidebarToggleButton)
         container.addSubview(navStack)
         container.addSubview(addressField)
         container.addSubview(newTabButton)
-        container.addSubview(scrollView)
+        container.addSubview(pageClipView)
         container.addSubview(bottomBar)
 
         NSLayoutConstraint.activate([
@@ -241,11 +241,11 @@ class TabSidebarViewController: NSViewController {
             newTabButton.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             newTabButton.heightAnchor.constraint(equalToConstant: 36),
 
-            // Tab list: below new tab button, above bottom bar
-            scrollView.topAnchor.constraint(equalTo: newTabButton.bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
+            // Page clip: below new tab button, above bottom bar
+            pageClipView.topAnchor.constraint(equalTo: newTabButton.bottomAnchor),
+            pageClipView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            pageClipView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            pageClipView.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
 
             // Bottom bar: pinned to bottom
             bottomBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -254,10 +254,101 @@ class TabSidebarViewController: NSViewController {
             bottomBar.heightAnchor.constraint(equalToConstant: 32),
         ])
 
-        scrollView.onScrollWheel = { [weak self] in self?.handleSpaceSwipe($0) }
-
         container.allowedTouchTypes = .indirect
         self.view = container
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        relayoutPages()
+    }
+
+    // MARK: - Page Management
+
+    func rebuildPages() {
+        let spaces = TabStore.shared.spaces
+        let newIDs = spaces.map { $0.id }
+        guard newIDs != pageSpaceIDs else {
+            // Space list unchanged, just update active page
+            updateActivePage()
+            return
+        }
+        pageSpaceIDs = newIDs
+
+        // Tear down old pages
+        for sv in pageScrollViews { sv.removeFromSuperview() }
+        pageScrollViews.removeAll()
+        pageTableViews.removeAll()
+
+        // Build one scroll view + table view per space
+        for _ in spaces {
+            let tv = DraggableTableView()
+            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TabColumn"))
+            tv.addTableColumn(column)
+            tv.headerView = nil
+            tv.rowHeight = 36
+            tv.style = .sourceList
+            tv.dataSource = self
+            tv.delegate = self
+            tv.registerForDraggedTypes([tabReorderPasteboardType])
+            tv.draggingDestinationFeedbackStyle = .sourceList
+
+            let sv = DraggableScrollView()
+            sv.contentView = DraggableClipView()
+            sv.documentView = tv
+            sv.hasVerticalScroller = true
+            sv.horizontalScrollElasticity = .none
+            sv.drawsBackground = false
+            sv.onScrollWheel = { [weak self] in self?.handleSpaceSwipe($0) }
+
+            pageStripView.addSubview(sv)
+            pageScrollViews.append(sv)
+            pageTableViews.append(tv)
+        }
+
+        relayoutPages()
+        updateActivePage()
+
+        // Reload all non-active pages from TabStore
+        for (i, tv) in pageTableViews.enumerated() where i != activePageIndex {
+            tv.reloadData()
+        }
+    }
+
+    private func relayoutPages() {
+        let pageW = pageClipView.bounds.width
+        let pageH = pageClipView.bounds.height
+        guard pageW > 0 else { return }
+
+        for (i, sv) in pageScrollViews.enumerated() {
+            sv.frame = NSRect(x: CGFloat(i) * pageW, y: 0, width: pageW, height: pageH)
+        }
+        pageStripView.frame = NSRect(
+            x: -CGFloat(activePageIndex) * pageW,
+            y: 0,
+            width: CGFloat(max(1, pageScrollViews.count)) * pageW,
+            height: pageH)
+    }
+
+    private func updateActivePage() {
+        let spaces = TabStore.shared.spaces
+        let newIndex: Int
+        if let id = activeSpaceID, let idx = spaces.firstIndex(where: { $0.id == id }) {
+            newIndex = idx
+        } else {
+            newIndex = 0
+        }
+        guard newIndex < pageScrollViews.count else { return }
+
+        activePageIndex = newIndex
+        scrollView = pageScrollViews[newIndex]
+        tableView = pageTableViews[newIndex]
+
+        // Snap strip to active page (no animation)
+        let pageW = pageClipView.bounds.width
+        if pageW > 0 {
+            pageStripView.frame.origin.x = -CGFloat(newIndex) * pageW
+        }
     }
 
     func updateSpaceButtons(spaces: [Space], activeSpaceID: UUID?) {
@@ -303,6 +394,8 @@ class TabSidebarViewController: NSViewController {
 
             spaceButtonsContainer.addArrangedSubview(button)
         }
+
+        rebuildPages()
     }
 
     private func makeNavButton(symbolName: String, accessibilityLabel: String, action: Selector) -> NSButton {
@@ -360,7 +453,6 @@ class TabSidebarViewController: NSViewController {
         let spaces = TabStore.shared.spaces
         guard sender.tag >= 0, sender.tag < spaces.count else { return }
         let spaceID = spaces[sender.tag].id
-        // Find the corresponding button in the container
         let button = spaceButtonsContainer.arrangedSubviews
             .compactMap { $0 as? NSButton }
             .first { $0.tag == sender.tag } ?? addSpaceButton
@@ -374,82 +466,132 @@ class TabSidebarViewController: NSViewController {
         delegate?.tabSidebarDidRequestDeleteSpace(self, spaceID: spaceID)
     }
 
+    // MARK: - Swipe Paging
+
     private var swipeAccumulatedX: CGFloat = 0
     private var isTrackingHorizontalSwipe = false
+    private var swipeStartTintColor: NSColor?
 
     private func handleSpaceSwipe(_ event: NSEvent) {
-        // Only handle trackpad scroll events
-        guard !isAnimatingSwipe, event.phase != [] || event.momentumPhase != [] else {
+        guard event.phase != [] else { return }
+
+        if event.phase == .began {
+            if isAnimatingSwipe { isAnimatingSwipe = false }
+            swipeAccumulatedX = 0
+            isTrackingHorizontalSwipe = false
+        }
+
+        guard !isAnimatingSwipe else { return }
+
+        if !isTrackingHorizontalSwipe {
+            guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY),
+                  event.scrollingDeltaX != 0 else { return }
+            isTrackingHorizontalSwipe = true
+            swipeStartTintColor = tintColor
+        }
+
+        if event.phase == .ended || event.phase == .cancelled {
+            isTrackingHorizontalSwipe = false
+            handleSwipeEnd()
             return
         }
 
-        if event.phase == .began {
-            swipeAccumulatedX = 0
-            isTrackingHorizontalSwipe = false
-        }
-
-        // Once we've committed to a horizontal swipe, keep tracking through .ended
-        // Otherwise, only start tracking if horizontal-dominant
-        if !isTrackingHorizontalSwipe {
-            guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY),
-                  event.scrollingDeltaX != 0 else {
-                return
-            }
-            isTrackingHorizontalSwipe = true
-        }
-
-        if event.phase == .ended || event.phase == .cancelled {
-            isTrackingHorizontalSwipe = false
-        }
-
         swipeAccumulatedX += event.scrollingDeltaX
+        updateStripPosition()
+    }
 
-        if event.phase == .ended || event.phase == .cancelled {
-            let threshold: CGFloat = 50
-            guard abs(swipeAccumulatedX) > threshold else {
-                swipeAccumulatedX = 0
-                return
-            }
+    private func updateStripPosition() {
+        let pageW = pageClipView.bounds.width
+        guard pageW > 0 else { return }
 
-            let spaces = TabStore.shared.spaces
-            guard let activeID = activeSpaceID,
-                  let currentIndex = spaces.firstIndex(where: { $0.id == activeID }) else {
-                swipeAccumulatedX = 0
-                return
-            }
+        let baseX = -CGFloat(activePageIndex) * pageW
+        let maxX: CGFloat = 0
+        let minX = -CGFloat(max(0, pageScrollViews.count - 1)) * pageW
 
-            // Positive scrollingDeltaX = swipe right (fingers move right) = go to previous space
-            let nextIndex = swipeAccumulatedX > 0 ? currentIndex - 1 : currentIndex + 1
-            swipeAccumulatedX = 0
-
-            guard nextIndex >= 0, nextIndex < spaces.count else { return }
-
-            let targetSpaceID = spaces[nextIndex].id
-            let slideDirection: CGFloat = nextIndex > currentIndex ? -1 : 1
-
-            isAnimatingSwipe = true
-            let width = scrollView.frame.width
-
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.2
-                context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-                scrollView.animator().alphaValue = 0
-                scrollView.animator().frame = scrollView.frame.offsetBy(dx: slideDirection * width * 0.3, dy: 0)
-            }, completionHandler: { [weak self] in
-                guard let self else { return }
-                self.delegate?.tabSidebarDidRequestSwitchToSpace(self, spaceID: targetSpaceID)
-
-                self.scrollView.frame = self.scrollView.frame.offsetBy(dx: -slideDirection * width * 0.6, dy: 0)
-                NSAnimationContext.runAnimationGroup({ context in
-                    context.duration = 0.2
-                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                    self.scrollView.animator().alphaValue = 1
-                    self.view.layoutSubtreeIfNeeded()
-                }, completionHandler: {
-                    self.isAnimatingSwipe = false
-                })
-            })
+        var targetX = baseX + swipeAccumulatedX
+        // Rubber-band at edges
+        if targetX > maxX {
+            targetX = maxX + (targetX - maxX) / 3
+        } else if targetX < minX {
+            targetX = minX + (targetX - minX) / 3
         }
+
+        pageStripView.frame.origin.x = targetX
+
+        // Interpolate tint color between adjacent space colors
+        let fractionalPage = -targetX / pageW
+        let leftIndex = Int(floor(fractionalPage))
+        let rightIndex = leftIndex + 1
+        let fraction = fractionalPage - CGFloat(leftIndex)
+        let spaces = TabStore.shared.spaces
+        if leftIndex >= 0, rightIndex < spaces.count {
+            let leftColor = spaces[leftIndex].color
+            let rightColor = spaces[rightIndex].color
+            if let blended = leftColor.blended(withFraction: fraction, of: rightColor) {
+                view.layer?.backgroundColor = blended.withAlphaComponent(0.05).cgColor
+            }
+        }
+    }
+
+    private func handleSwipeEnd() {
+        let pageW = pageClipView.bounds.width
+        guard pageW > 0 else { return }
+
+        let currentOffset = -pageStripView.frame.origin.x
+        let fractionalPage = currentOffset / pageW
+
+        // Snap to nearest page, biased toward the swipe direction
+        let targetPage: Int
+        if abs(swipeAccumulatedX) > pageW * 0.5 {
+            if swipeAccumulatedX > 0 {
+                targetPage = max(0, activePageIndex - 1)
+            } else {
+                targetPage = min(pageScrollViews.count - 1, activePageIndex + 1)
+            }
+        } else {
+            targetPage = Int(round(fractionalPage)).clamped(to: 0...(max(0, pageScrollViews.count - 1)))
+        }
+
+        let targetX = -CGFloat(targetPage) * pageW
+        let distance = abs(pageStripView.frame.origin.x - targetX)
+        let duration = min(0.25, max(0.08, Double(distance / pageW) * 0.25))
+
+        isAnimatingSwipe = true
+
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = duration
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            var frame = pageStripView.frame
+            frame.origin.x = targetX
+            pageStripView.animator().frame = frame
+        })
+
+        // Cleanup scheduled independently of animation completion
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.02) { [weak self] in
+            guard let self else { return }
+            self.isAnimatingSwipe = false
+
+            if targetPage != self.activePageIndex {
+                let spaces = TabStore.shared.spaces
+                guard targetPage < spaces.count else { return }
+                self.delegate?.tabSidebarDidRequestSwitchToSpace(self, spaceID: spaces[targetPage].id)
+            } else if let startColor = self.swipeStartTintColor {
+                // Cancelled — restore original tint
+                self.view.layer?.backgroundColor = startColor.withAlphaComponent(0.05).cgColor
+            }
+        }
+
+        swipeAccumulatedX = 0
+    }
+
+    // MARK: - Helpers
+
+    private func tabsForTableView(_ tv: NSTableView) -> [BrowserTab] {
+        guard let index = pageTableViews.firstIndex(where: { $0 === tv }) else { return tabs }
+        if index == activePageIndex { return tabs }
+        let spaces = TabStore.shared.spaces
+        guard index < spaces.count else { return [] }
+        return spaces[index].tabs
     }
 
     func reloadTab(at index: Int) {
@@ -462,10 +604,11 @@ class TabSidebarViewController: NSViewController {
 
 extension TabSidebarViewController: NSTableViewDataSource {
     func numberOfRows(in tableView: NSTableView) -> Int {
-        tabs.count
+        tabsForTableView(tableView).count
     }
 
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+        guard tableView === self.tableView else { return nil }
         let item = NSPasteboardItem()
         item.setString(String(row), forType: tabReorderPasteboardType)
         return item
@@ -488,7 +631,6 @@ extension TabSidebarViewController: NSTableViewDataSource {
         tableView.moveRow(at: sourceRow, to: destinationRow)
         tableView.endUpdates()
 
-        // Suppress reloadData during the synchronous observer callback chain
         suppressReload = true
         delegate?.tabSidebar(self, didMoveTabFrom: sourceRow, to: row)
         suppressReload = false
@@ -500,6 +642,9 @@ extension TabSidebarViewController: NSTableViewDataSource {
 
 extension TabSidebarViewController: NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let tabsForTable = tabsForTableView(tableView)
+        let isActive = tableView === self.tableView
+
         let cellID = NSUserInterfaceItemIdentifier("TabCell")
         let cell: TabCellView
         if let existing = tableView.makeView(withIdentifier: cellID, owner: nil) as? TabCellView {
@@ -509,13 +654,18 @@ extension TabSidebarViewController: NSTableViewDelegate {
             cell.identifier = cellID
         }
 
-        let tab = tabs[row]
+        guard row < tabsForTable.count else { return cell }
+        let tab = tabsForTable[row]
         cell.titleLabel.stringValue = tab.title
         cell.toolTip = tab.title
         cell.updateFavicon(tab.favicon)
-        cell.onClose = { [weak self] in
-            guard let self else { return }
-            self.delegate?.tabSidebar(self, didRequestCloseTabAt: row)
+        if isActive {
+            cell.onClose = { [weak self] in
+                guard let self else { return }
+                self.delegate?.tabSidebar(self, didRequestCloseTabAt: row)
+            }
+        } else {
+            cell.onClose = nil
         }
         return cell
     }
@@ -525,8 +675,16 @@ extension TabSidebarViewController: NSTableViewDelegate {
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        guard let notifyingTable = notification.object as? NSTableView,
+              notifyingTable === tableView else { return }
         let row = tableView.selectedRow
         guard row >= 0 else { return }
         delegate?.tabSidebar(self, didSelectTabAt: row)
+    }
+}
+
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }
