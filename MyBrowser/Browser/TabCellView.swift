@@ -1,0 +1,124 @@
+import AppKit
+
+class TabRowView: NSTableRowView {
+    override func drawSelection(in dirtyRect: NSRect) {
+        // Let the default source list selection draw as normal
+        super.drawSelection(in: dirtyRect)
+    }
+
+    /// The inset rect the source list uses for its selection highlight
+    var selectionRect: NSRect {
+        // Source list selection is inset ~10pt horizontally, ~1pt vertically, with 6pt corner radius
+        return bounds.insetBy(dx: 10, dy: 1)
+    }
+}
+
+class TabCellView: NSTableCellView {
+    let titleLabel = NSTextField(labelWithString: "")
+    let faviconImageView = NSImageView()
+    private let closeButton: NSButton
+    private var trackingArea: NSTrackingArea?
+    private var titleTrailingDefault: NSLayoutConstraint!
+    private var titleTrailingHover: NSLayoutConstraint!
+    private var titleLeadingToFavicon: NSLayoutConstraint!
+    private let hoverBackground = NSView()
+    var onClose: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        closeButton = NSButton(
+            image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")!,
+            target: nil,
+            action: nil
+        )
+        super.init(frame: frameRect)
+
+        hoverBackground.wantsLayer = true
+        hoverBackground.layer?.cornerRadius = 6
+        hoverBackground.isHidden = true
+        addSubview(hoverBackground, positioned: .below, relativeTo: nil)
+
+        faviconImageView.imageScaling = .scaleProportionallyUpOrDown
+        faviconImageView.translatesAutoresizingMaskIntoConstraints = false
+        faviconImageView.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
+
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        closeButton.bezelStyle = .inline
+        closeButton.isBordered = false
+        closeButton.isHidden = true
+        closeButton.target = self
+        closeButton.action = #selector(closeTapped)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(faviconImageView)
+        addSubview(titleLabel)
+        addSubview(closeButton)
+
+        titleTrailingDefault = titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4)
+        titleTrailingHover = titleLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4)
+        titleLeadingToFavicon = titleLabel.leadingAnchor.constraint(equalTo: faviconImageView.trailingAnchor, constant: 8)
+
+        NSLayoutConstraint.activate([
+            faviconImageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            faviconImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            faviconImageView.widthAnchor.constraint(equalToConstant: 16),
+            faviconImageView.heightAnchor.constraint(equalToConstant: 16),
+
+            titleLeadingToFavicon,
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleTrailingDefault,
+
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 16),
+            closeButton.heightAnchor.constraint(equalToConstant: 16),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        // Match the source list selection inset (same as TabRowView.selectionRect)
+        hoverBackground.frame = bounds.insetBy(dx: -6, dy: 1)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        closeButton.isHidden = false
+        titleTrailingDefault.isActive = false
+        titleTrailingHover.isActive = true
+        hoverBackground.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+        hoverBackground.isHidden = false
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        closeButton.isHidden = true
+        titleTrailingHover.isActive = false
+        titleTrailingDefault.isActive = true
+        hoverBackground.isHidden = true
+    }
+
+    func updateFavicon(_ image: NSImage?) {
+        faviconImageView.image = image ?? NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
+    }
+
+    @objc private func closeTapped() {
+        onClose?()
+    }
+}
