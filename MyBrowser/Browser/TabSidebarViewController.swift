@@ -9,10 +9,23 @@ protocol TabSidebarDelegate: AnyObject {
     func tabSidebarDidRequestReload(_ sidebar: TabSidebarViewController)
     func tabSidebar(_ sidebar: TabSidebarViewController, didSubmitAddressInput input: String)
     func tabSidebarDidRequestToggleSidebar(_ sidebar: TabSidebarViewController)
+    func tabSidebar(_ sidebar: TabSidebarViewController, didMoveTabFrom sourceIndex: Int, to destinationIndex: Int)
 }
 
 class DraggableTableView: NSTableView {
-    override var mouseDownCanMoveWindow: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func dragImageForRows(with dragRows: IndexSet, tableColumns: [NSTableColumn], event: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage {
+        let image = super.dragImageForRows(with: dragRows, tableColumns: tableColumns, event: event, offset: dragImageOffset)
+        guard let row = dragRows.first else { return image }
+        let rowRect = rect(ofRow: row)
+        let mouseInTable = convert(event.locationInWindow, from: nil)
+        dragImageOffset.pointee = NSPoint(
+            x: mouseInTable.x - rowRect.origin.x,
+            y: mouseInTable.y - rowRect.origin.y
+        )
+        return image
+    }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
@@ -33,6 +46,8 @@ class DraggableClipView: NSClipView {
     override var mouseDownCanMoveWindow: Bool { true }
 }
 
+private let tabReorderPasteboardType = NSPasteboard.PasteboardType("com.mybrowser.tab-reorder")
+
 class TabSidebarViewController: NSViewController {
     weak var delegate: TabSidebarDelegate?
 
@@ -44,8 +59,12 @@ class TabSidebarViewController: NSViewController {
     private(set) var reloadButton = NSButton()
     private(set) var sidebarToggleButton = NSButton()
 
+    private var suppressReload = false
+
     var tabs: [BrowserTab] = [] {
-        didSet { tableView.reloadData() }
+        didSet {
+            if !suppressReload { tableView.reloadData() }
+        }
     }
 
     var selectedTabIndex: Int {
@@ -92,6 +111,8 @@ class TabSidebarViewController: NSViewController {
         tableView.delegate = self
         tableView.rowHeight = 36
         tableView.style = .sourceList
+        tableView.registerForDraggedTypes([tabReorderPasteboardType])
+        tableView.draggingDestinationFeedbackStyle = .sourceList
 
         scrollView.contentView = DraggableClipView()
         scrollView.documentView = tableView
@@ -218,6 +239,36 @@ class TabSidebarViewController: NSViewController {
 extension TabSidebarViewController: NSTableViewDataSource {
     func numberOfRows(in tableView: NSTableView) -> Int {
         tabs.count
+    }
+
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+        let item = NSPasteboardItem()
+        item.setString(String(row), forType: tabReorderPasteboardType)
+        return item
+    }
+
+    func tableView(_ tableView: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
+        guard dropOperation == .above else { return [] }
+        return .move
+    }
+
+    func tableView(_ tableView: NSTableView, acceptDrop info: any NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
+        guard let item = info.draggingPasteboard.pasteboardItems?.first,
+              let rowString = item.string(forType: tabReorderPasteboardType),
+              let sourceRow = Int(rowString) else { return false }
+
+        let destinationRow = sourceRow < row ? row - 1 : row
+        guard sourceRow != destinationRow else { return false }
+
+        tableView.beginUpdates()
+        tableView.moveRow(at: sourceRow, to: destinationRow)
+        tableView.endUpdates()
+
+        // Suppress reloadData during the synchronous observer callback chain
+        suppressReload = true
+        delegate?.tabSidebar(self, didMoveTabFrom: sourceRow, to: row)
+        suppressReload = false
+        return true
     }
 }
 

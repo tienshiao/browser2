@@ -716,6 +716,11 @@ extension BrowserWindowController: TabSidebarDelegate {
     func tabSidebarDidRequestToggleSidebar(_ sidebar: TabSidebarViewController) {
         toggleSidebarAutoHide()
     }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didMoveTabFrom sourceIndex: Int, to destinationIndex: Int) {
+        let adjustedDestination = sourceIndex < destinationIndex ? destinationIndex - 1 : destinationIndex
+        store.moveTab(from: sourceIndex, to: adjustedDestination)
+    }
 }
 
 // MARK: - TabStoreObserver
