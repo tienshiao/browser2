@@ -109,6 +109,9 @@ class TabSidebarViewController: NSViewController {
             } else {
                 view.layer?.backgroundColor = nil
             }
+            tableView.enumerateAvailableRowViews { rowView, _ in
+                (rowView as? TabRowView)?.selectionColor = tintColor
+            }
         }
     }
 
@@ -712,7 +715,9 @@ extension TabSidebarViewController: NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        TabRowView()
+        let rowView = TabRowView()
+        rowView.selectionColor = tintColor
+        return rowView
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {

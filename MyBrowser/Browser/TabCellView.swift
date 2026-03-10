@@ -1,9 +1,16 @@
 import AppKit
 
 class TabRowView: NSTableRowView {
+    var selectionColor: NSColor?
+
     override func drawSelection(in dirtyRect: NSRect) {
-        // Let the default source list selection draw as normal
-        super.drawSelection(in: dirtyRect)
+        guard let color = selectionColor else {
+            super.drawSelection(in: dirtyRect)
+            return
+        }
+        let alpha: CGFloat = isEmphasized ? 0.35 : 0.12
+        color.withAlphaComponent(alpha).setFill()
+        NSBezierPath(roundedRect: selectionRect, xRadius: 6, yRadius: 6).fill()
     }
 
     /// The inset rect the source list uses for its selection highlight
