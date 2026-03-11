@@ -650,6 +650,12 @@ class BrowserWindowController: NSWindowController {
         toggleSidebarAutoHide()
     }
 
+    @objc func reopenClosedTab(_ sender: Any?) {
+        guard let space = activeSpace,
+              let tab = store.reopenClosedTab(in: space) else { return }
+        selectTab(id: tab.id)
+    }
+
     @objc func newTab(_ sender: Any?) {
         commandPaletteNavigatesInPlace = false
         showCommandPalette()
@@ -786,6 +792,18 @@ class BrowserWindowController: NSWindowController {
         }
         popover.contentViewController = vc
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+}
+
+// MARK: - NSMenuItemValidation
+
+extension BrowserWindowController: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(reopenClosedTab(_:)) {
+            guard let space = activeSpace else { return false }
+            return store.canReopenClosedTab(in: space)
+        }
+        return true
     }
 }
 

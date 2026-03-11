@@ -74,6 +74,7 @@ class TabStore {
     static let shared = TabStore()
 
     private(set) var spaces: [Space] = []
+    private(set) var closedTabStack: [ClosedTabRecord] = []
     private var observers: [WeakObserver] = []
     private var tabSubscriptions: [UUID: Set<AnyCancellable>] = [:]
     private var saveWorkItem: DispatchWorkItem?
@@ -176,6 +177,9 @@ class TabStore {
             self.spaces.append(space)
         }
 
+        // Load closed tab stack from DB
+        self.closedTabStack = AppDatabase.shared.loadClosedTabs()
+
         let activeID = session.lastActiveSpaceID.flatMap { UUID(uuidString: $0) } ?? self.spaces.first!.id
         self.lastActiveSpaceID = activeID
         self.notifyObservers { $0.tabStoreDidUpdateSpaces() }
@@ -250,6 +254,11 @@ class TabStore {
         for tab in space.tabs {
             tabSubscriptions.removeValue(forKey: tab.id)
         }
+        // Clean up closed tab records for this space
+        let spaceIDString = id.uuidString
+        AppDatabase.shared.deleteClosedTabs(spaceID: spaceIDString)
+        closedTabStack.removeAll { $0.spaceID == spaceIDString }
+
         WKWebsiteDataStore.remove(forIdentifier: space.id) { _ in }
         notifyObservers { $0.tabStoreDidUpdateSpaces() }
         scheduleSave()
@@ -318,6 +327,31 @@ class TabStore {
     func closeTab(id: UUID, in space: Space) {
         guard let index = space.tabs.firstIndex(where: { $0.id == id }) else { return }
         let tab = space.tabs[index]
+
+        // Archive to closed tab stack (skip incognito)
+        if !space.isIncognito {
+            var stateData: Data?
+            if let state = tab.webView.interactionState {
+                stateData = try? NSKeyedArchiver.archivedData(withRootObject: state, requiringSecureCoding: false)
+            }
+            let record = ClosedTabRecord(
+                id: nil,
+                tabID: tab.id.uuidString,
+                spaceID: space.id.uuidString,
+                url: tab.url?.absoluteString,
+                title: tab.title,
+                faviconURL: tab.faviconURL?.absoluteString,
+                interactionState: stateData,
+                sortOrder: index
+            )
+            AppDatabase.shared.pushClosedTab(record)
+            closedTabStack.insert(record, at: 0)
+            // Trim in-memory stack to match cap
+            if closedTabStack.count > 100 {
+                closedTabStack = Array(closedTabStack.prefix(100))
+            }
+        }
+
         tabSubscriptions.removeValue(forKey: tab.id)
         space.tabs.remove(at: index)
         notifyObservers { $0.tabStoreDidRemoveTab(tab, at: index, in: space) }
@@ -332,6 +366,39 @@ class TabStore {
         space.tabs.insert(tab, at: destinationIndex)
         notifyObservers { $0.tabStoreDidReorderTabs(in: space) }
         scheduleSave()
+    }
+
+    // MARK: - Reopen Closed Tab
+
+    func canReopenClosedTab(in space: Space) -> Bool {
+        let spaceIDString = space.id.uuidString
+        return closedTabStack.contains { $0.spaceID == spaceIDString }
+    }
+
+    @discardableResult
+    func reopenClosedTab(in space: Space) -> BrowserTab? {
+        let spaceIDString = space.id.uuidString
+        guard let stackIndex = closedTabStack.firstIndex(where: { $0.spaceID == spaceIDString }) else {
+            return nil
+        }
+        let record = closedTabStack.remove(at: stackIndex)
+        _ = AppDatabase.shared.popClosedTab(spaceID: spaceIDString)
+
+        let tab = BrowserTab(
+            id: UUID(),
+            title: record.title,
+            archivedInteractionState: record.interactionState,
+            fallbackURL: record.url.flatMap { URL(string: $0) },
+            faviconURL: record.faviconURL.flatMap { URL(string: $0) },
+            configuration: space.makeWebViewConfiguration()
+        )
+
+        let insertionIndex = min(record.sortOrder, space.tabs.count)
+        space.tabs.insert(tab, at: insertionIndex)
+        subscribeToTab(tab, spaceID: space.id)
+        notifyObservers { $0.tabStoreDidInsertTab(tab, at: insertionIndex, in: space) }
+        scheduleSave()
+        return tab
     }
 
     // MARK: - Per-Tab Subscriptions

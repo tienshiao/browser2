@@ -149,4 +149,91 @@ final class AppDatabaseTests: XCTestCase {
         XCTAssertEqual(loaded.faviconURL, "https://example.com/icon.png")
         XCTAssertEqual(loaded.interactionState, stateData)
     }
+
+    // MARK: - Closed Tab Stack
+
+    func testPushAndPopClosedTabRoundTrip() throws {
+        let db = try makeDatabase()
+        let record = ClosedTabRecord(id: nil, tabID: "t1", spaceID: "s1", url: "https://example.com", title: "Example", faviconURL: "https://example.com/icon.png", interactionState: "state".data(using: .utf8), sortOrder: 2)
+
+        db.pushClosedTab(record)
+
+        let popped = db.popClosedTab(spaceID: "s1")
+        XCTAssertNotNil(popped)
+        XCTAssertEqual(popped!.tabID, "t1")
+        XCTAssertEqual(popped!.spaceID, "s1")
+        XCTAssertEqual(popped!.url, "https://example.com")
+        XCTAssertEqual(popped!.title, "Example")
+        XCTAssertEqual(popped!.faviconURL, "https://example.com/icon.png")
+        XCTAssertEqual(popped!.interactionState, "state".data(using: .utf8))
+        XCTAssertEqual(popped!.sortOrder, 2)
+    }
+
+    func testPopReturnsNilWhenEmpty() throws {
+        let db = try makeDatabase()
+        let result = db.popClosedTab(spaceID: "s1")
+        XCTAssertNil(result)
+    }
+
+    func testPopFiltersBySpaceID() throws {
+        let db = try makeDatabase()
+        db.pushClosedTab(ClosedTabRecord(id: nil, tabID: "t1", spaceID: "s1", url: nil, title: "Tab 1", faviconURL: nil, interactionState: nil, sortOrder: 0))
+        db.pushClosedTab(ClosedTabRecord(id: nil, tabID: "t2", spaceID: "s2", url: nil, title: "Tab 2", faviconURL: nil, interactionState: nil, sortOrder: 0))
+        db.pushClosedTab(ClosedTabRecord(id: nil, tabID: "t3", spaceID: "s1", url: nil, title: "Tab 3", faviconURL: nil, interactionState: nil, sortOrder: 1))
+
+        // Pop from s1 should get t3 (most recent for s1)
+        let popped1 = db.popClosedTab(spaceID: "s1")
+        XCTAssertEqual(popped1?.tabID, "t3")
+
+        // Pop from s1 again should get t1
+        let popped2 = db.popClosedTab(spaceID: "s1")
+        XCTAssertEqual(popped2?.tabID, "t1")
+
+        // Pop from s1 again should be nil
+        let popped3 = db.popClosedTab(spaceID: "s1")
+        XCTAssertNil(popped3)
+
+        // s2's entry should still be there
+        let popped4 = db.popClosedTab(spaceID: "s2")
+        XCTAssertEqual(popped4?.tabID, "t2")
+    }
+
+    func testClosedTabLIFOOrdering() throws {
+        let db = try makeDatabase()
+        db.pushClosedTab(ClosedTabRecord(id: nil, tabID: "t1", spaceID: "s1", url: nil, title: "First", faviconURL: nil, interactionState: nil, sortOrder: 0))
+        db.pushClosedTab(ClosedTabRecord(id: nil, tabID: "t2", spaceID: "s1", url: nil, title: "Second", faviconURL: nil, interactionState: nil, sortOrder: 1))
+        db.pushClosedTab(ClosedTabRecord(id: nil, tabID: "t3", spaceID: "s1", url: nil, title: "Third", faviconURL: nil, interactionState: nil, sortOrder: 2))
+
+        XCTAssertEqual(db.popClosedTab(spaceID: "s1")?.tabID, "t3")
+        XCTAssertEqual(db.popClosedTab(spaceID: "s1")?.tabID, "t2")
+        XCTAssertEqual(db.popClosedTab(spaceID: "s1")?.tabID, "t1")
+    }
+
+    func testClosedTabCapEnforcement() throws {
+        let db = try makeDatabase()
+        for i in 1...105 {
+            db.pushClosedTab(ClosedTabRecord(id: nil, tabID: "t\(i)", spaceID: "s1", url: nil, title: "Tab \(i)", faviconURL: nil, interactionState: nil, sortOrder: 0))
+        }
+
+        let all = db.loadClosedTabs()
+        XCTAssertEqual(all.count, 100)
+
+        // The oldest 5 (t1-t5) should have been trimmed; most recent should be t105
+        XCTAssertEqual(all.first?.tabID, "t105")
+        XCTAssertEqual(all.last?.tabID, "t6")
+    }
+
+    func testDeleteClosedTabsBySpaceID() throws {
+        let db = try makeDatabase()
+        db.pushClosedTab(ClosedTabRecord(id: nil, tabID: "t1", spaceID: "s1", url: nil, title: "Tab 1", faviconURL: nil, interactionState: nil, sortOrder: 0))
+        db.pushClosedTab(ClosedTabRecord(id: nil, tabID: "t2", spaceID: "s2", url: nil, title: "Tab 2", faviconURL: nil, interactionState: nil, sortOrder: 0))
+        db.pushClosedTab(ClosedTabRecord(id: nil, tabID: "t3", spaceID: "s1", url: nil, title: "Tab 3", faviconURL: nil, interactionState: nil, sortOrder: 1))
+
+        db.deleteClosedTabs(spaceID: "s1")
+
+        let all = db.loadClosedTabs()
+        XCTAssertEqual(all.count, 1)
+        XCTAssertEqual(all.first?.tabID, "t2")
+        XCTAssertEqual(all.first?.spaceID, "s2")
+    }
 }

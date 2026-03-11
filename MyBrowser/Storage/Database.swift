@@ -47,6 +47,69 @@ struct AppDatabase {
         }
     }
 
+    // MARK: - Closed Tab Stack
+
+    private static let closedTabCap = 100
+
+    func pushClosedTab(_ record: ClosedTabRecord) {
+        do {
+            try dbQueue.write { db in
+                var r = record
+                try r.insert(db)
+                // Trim oldest entries beyond cap
+                let count = try ClosedTabRecord.fetchCount(db)
+                if count > Self.closedTabCap {
+                    let excess = count - Self.closedTabCap
+                    try db.execute(
+                        sql: "DELETE FROM closedTab WHERE id IN (SELECT id FROM closedTab ORDER BY id ASC LIMIT ?)",
+                        arguments: [excess]
+                    )
+                }
+            }
+        } catch {
+            print("Failed to push closed tab: \(error)")
+        }
+    }
+
+    func popClosedTab(spaceID: String) -> ClosedTabRecord? {
+        do {
+            return try dbQueue.write { db in
+                guard let record = try ClosedTabRecord
+                    .filter(Column("spaceID") == spaceID)
+                    .order(Column("id").desc)
+                    .fetchOne(db) else { return nil }
+                try record.delete(db)
+                return record
+            }
+        } catch {
+            print("Failed to pop closed tab: \(error)")
+            return nil
+        }
+    }
+
+    func loadClosedTabs() -> [ClosedTabRecord] {
+        do {
+            return try dbQueue.read { db in
+                try ClosedTabRecord.order(Column("id").desc).fetchAll(db)
+            }
+        } catch {
+            print("Failed to load closed tabs: \(error)")
+            return []
+        }
+    }
+
+    func deleteClosedTabs(spaceID: String) {
+        do {
+            try dbQueue.write { db in
+                try ClosedTabRecord
+                    .filter(Column("spaceID") == spaceID)
+                    .deleteAll(db)
+            }
+        } catch {
+            print("Failed to delete closed tabs for space: \(error)")
+        }
+    }
+
     func loadSession() -> (spaces: [(SpaceRecord, [TabRecord])], lastActiveSpaceID: String?)? {
         do {
             return try dbQueue.read { db in
@@ -100,6 +163,19 @@ struct AppDatabase {
                 t.column("value", .text)
             }
 
+        }
+
+        migrator.registerMigration("v2") { db in
+            try db.create(table: "closedTab") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("tabID", .text).notNull()
+                t.column("spaceID", .text).notNull()
+                t.column("url", .text)
+                t.column("title", .text).notNull()
+                t.column("faviconURL", .text)
+                t.column("interactionState", .blob)
+                t.column("sortOrder", .integer).notNull()
+            }
         }
 
         return migrator
