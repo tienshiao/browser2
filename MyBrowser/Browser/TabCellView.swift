@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 class TabRowView: NSTableRowView {
     var selectionColor: NSColor?
@@ -8,7 +9,7 @@ class TabRowView: NSTableRowView {
             super.drawSelection(in: dirtyRect)
             return
         }
-        let alpha: CGFloat = isEmphasized ? 0.35 : 0.12
+        let alpha: CGFloat = isEmphasized ? 0.35 : 0.15
         color.withAlphaComponent(alpha).setFill()
         NSBezierPath(roundedRect: selectionRect, xRadius: 6, yRadius: 6).fill()
     }
@@ -21,9 +22,15 @@ class TabRowView: NSTableRowView {
 }
 
 class TabCellView: NSTableCellView {
+    enum LoadingIndicatorMode {
+        case ringSpinner   // Option A: spinning ring around favicon -- not currently used, still buggy/incomplete
+        case progressBar   // Option B: background progress bar
+    }
+
+    static var loadingMode: LoadingIndicatorMode = .progressBar
+
     let titleLabel = NSTextField(labelWithString: "")
     let faviconImageView = NSImageView()
-    private let spinner = NSProgressIndicator()
     private let closeButton: NSButton
     private var trackingArea: NSTrackingArea?
     private var titleTrailingDefault: NSLayoutConstraint!
@@ -31,6 +38,13 @@ class TabCellView: NSTableCellView {
     private var titleLeadingToFavicon: NSLayoutConstraint!
     private let hoverBackground = NSView()
     var onClose: (() -> Void)?
+
+    // Option A: Ring spinner layer
+    private var ringLayer: CAShapeLayer?
+
+    // Option B: Progress bar (frame set manually in layout())
+    private let progressView = NSView()
+    private var currentProgress: Double = 0
 
     override init(frame frameRect: NSRect) {
         closeButton = NSButton(
@@ -40,19 +54,22 @@ class TabCellView: NSTableCellView {
         )
         super.init(frame: frameRect)
 
+        // Progress bar (Option B) — frame managed in layout(), no constraints
+        progressView.wantsLayer = true
+        progressView.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.05).cgColor
+        progressView.layer?.cornerRadius = 6
+        progressView.alphaValue = 0
+        addSubview(progressView, positioned: .below, relativeTo: nil)
+
         hoverBackground.wantsLayer = true
         hoverBackground.layer?.cornerRadius = 6
         hoverBackground.isHidden = true
         addSubview(hoverBackground, positioned: .below, relativeTo: nil)
 
+        faviconImageView.wantsLayer = true
         faviconImageView.imageScaling = .scaleProportionallyUpOrDown
         faviconImageView.translatesAutoresizingMaskIntoConstraints = false
         faviconImageView.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
-
-        spinner.style = .spinning
-        spinner.controlSize = .small
-        spinner.translatesAutoresizingMaskIntoConstraints = false
-        spinner.isHidden = true
 
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -65,7 +82,6 @@ class TabCellView: NSTableCellView {
         closeButton.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(faviconImageView)
-        addSubview(spinner)
         addSubview(titleLabel)
         addSubview(closeButton)
 
@@ -78,9 +94,6 @@ class TabCellView: NSTableCellView {
             faviconImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
             faviconImageView.widthAnchor.constraint(equalToConstant: 16),
             faviconImageView.heightAnchor.constraint(equalToConstant: 16),
-
-            spinner.centerXAnchor.constraint(equalTo: faviconImageView.centerXAnchor),
-            spinner.centerYAnchor.constraint(equalTo: faviconImageView.centerYAnchor),
 
             titleLeadingToFavicon,
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -97,8 +110,15 @@ class TabCellView: NSTableCellView {
 
     override func layout() {
         super.layout()
-        // Match the source list selection inset (same as TabRowView.selectionRect)
         hoverBackground.frame = bounds.insetBy(dx: -6, dy: 1)
+        // Progress bar spans the full row area (same rect as hover background)
+        let rowRect = bounds.insetBy(dx: -6, dy: 1)
+        progressView.frame = NSRect(
+            x: rowRect.origin.x,
+            y: rowRect.origin.y,
+            width: rowRect.width * currentProgress,
+            height: rowRect.height
+        )
     }
 
     override func updateTrackingAreas() {
@@ -136,15 +156,107 @@ class TabCellView: NSTableCellView {
     }
 
     func updateLoading(_ isLoading: Bool) {
-        if isLoading {
-            spinner.startAnimation(nil)
-            spinner.isHidden = false
-            faviconImageView.isHidden = true
-        } else {
-            spinner.stopAnimation(nil)
-            spinner.isHidden = true
-            faviconImageView.isHidden = false
+        switch Self.loadingMode {
+        case .ringSpinner:
+            if isLoading {
+                showRingSpinner()
+            } else {
+                hideRingSpinner()
+            }
+        case .progressBar:
+            if !isLoading {
+                hideProgressBar()
+            }
         }
+    }
+
+    func updateProgress(_ progress: Double) {
+        guard Self.loadingMode == .progressBar else { return }
+        let clampedProgress = min(max(progress, 0), 1)
+        currentProgress = clampedProgress
+
+        // Don't show at 0, and auto-hide when reaching 1.0
+        if clampedProgress <= 0 || clampedProgress >= 1.0 {
+            if progressView.alphaValue > 0 {
+                hideProgressBar()
+            }
+            return
+        }
+
+        if progressView.alphaValue == 0 {
+            progressView.alphaValue = 1
+        }
+
+        let rowRect = bounds.insetBy(dx: -6, dy: 1)
+        let targetFrame = NSRect(
+            x: rowRect.origin.x,
+            y: rowRect.origin.y,
+            width: rowRect.width * clampedProgress,
+            height: rowRect.height
+        )
+
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.25
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            progressView.animator().frame = targetFrame
+        }
+    }
+
+    // MARK: - Option A: Ring Spinner
+
+    private func showRingSpinner() {
+        guard ringLayer == nil else { return }
+        wantsLayer = true
+        guard let cellLayer = layer else { return }
+
+        let diameter: CGFloat = 20
+        let ring = CAShapeLayer()
+        ring.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
+
+        // Position the ring at the favicon's center in the cell's coordinate space
+        let ff = faviconImageView.frame
+        // AppKit layers are not flipped — convert from flipped view coords to layer coords
+        ring.position = CGPoint(x: ff.midX, y: cellLayer.bounds.height - ff.midY)
+
+        let path = CGPath(
+            ellipseIn: ring.bounds.insetBy(dx: 1, dy: 1),
+            transform: nil
+        )
+        ring.path = path
+        ring.fillColor = nil
+        ring.strokeColor = NSColor.controlAccentColor.cgColor
+        ring.lineWidth = 2
+        ring.strokeStart = 0
+        ring.strokeEnd = 0.3
+        ring.lineCap = .round
+
+        let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
+        rotation.fromValue = 0
+        rotation.toValue = CGFloat.pi * 2
+        rotation.duration = 1
+        rotation.repeatCount = .infinity
+
+        ring.add(rotation, forKey: "spin")
+        cellLayer.addSublayer(ring)
+        ringLayer = ring
+    }
+
+    private func hideRingSpinner() {
+        ringLayer?.removeFromSuperlayer()
+        ringLayer = nil
+    }
+
+    // MARK: - Option B: Progress Bar
+
+    private func hideProgressBar() {
+        currentProgress = 0
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.3
+            progressView.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            guard let self else { return }
+            self.progressView.frame.size.width = 0
+        })
     }
 
     @objc private func closeTapped() {

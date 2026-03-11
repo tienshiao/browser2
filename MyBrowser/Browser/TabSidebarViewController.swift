@@ -745,6 +745,7 @@ extension TabSidebarViewController: NSTableViewDelegate {
         cell.toolTip = tab.title
         cell.updateFavicon(tab.favicon)
         cell.updateLoading(tab.isLoading)
+        cell.updateProgress(tab.estimatedProgress)
         if isActive {
             cell.onClose = { [weak self] in
                 guard let self else { return }
