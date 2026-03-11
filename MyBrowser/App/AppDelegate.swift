@@ -6,8 +6,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
 
-        // Initialize database before restoring session
+        // Initialize databases before restoring session
         _ = AppDatabase.shared
+        _ = HistoryDatabase.shared
+        HistoryDatabase.shared.expireOldVisits()
 
         let wc = BrowserWindowController(incognito: false)
         windowControllers.append(wc)

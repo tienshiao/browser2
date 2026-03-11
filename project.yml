@@ -20,3 +20,18 @@ targets:
         INFOPLIST_FILE: MyBrowser/Resources/Info.plist
         SWIFT_VERSION: "5.10"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
+  MyBrowserTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - MyBrowserTests
+    dependencies:
+      - target: MyBrowser
+      - package: GRDB
+    settings:
+      base:
+        SWIFT_VERSION: "5.10"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/MyBrowser.app/Contents/MacOS/MyBrowser"
+        BUNDLE_LOADER: "$(TEST_HOST)"
