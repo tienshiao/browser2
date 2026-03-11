@@ -454,6 +454,7 @@ class BrowserWindowController: NSWindowController {
         selectedTabID = id
         activeSpace?.selectedTabID = id
         activeTabSubscriptions.removeAll()
+        dragHandle.isHidden = false
 
         guard let tab = currentTabs.first(where: { $0.id == id }) else { return }
 
@@ -703,6 +704,7 @@ class BrowserWindowController: NSWindowController {
         selectedTabID = nil
         activeSpace?.selectedTabID = nil
         activeTabSubscriptions.removeAll()
+        dragHandle.isHidden = true
         removeContentViews()
         tabSidebar.addressField.stringValue = ""
         tabSidebar.backButton.isEnabled = false

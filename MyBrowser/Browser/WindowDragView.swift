@@ -3,7 +3,7 @@ import AppKit
 /// Transparent view that sits atop the content area to enable window dragging.
 /// Initiates a window drag on mouse-down; forwards clicks if no drag occurred.
 class WindowDragView: NSView {
-    override var mouseDownCanMoveWindow: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
 
     override func mouseDown(with event: NSEvent) {
         guard let window else { return }
