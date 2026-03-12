@@ -204,11 +204,11 @@ class TabSidebarViewController: NSViewController {
 
             // Address field: below title bar area
             fauxAddressBar.topAnchor.constraint(equalTo: container.topAnchor, constant: 38),
-            fauxAddressBar.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            fauxAddressBar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            fauxAddressBar.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+            fauxAddressBar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
 
             // Page clip: below address field, above bottom bar
-            fauxAddressBar.heightAnchor.constraint(equalToConstant: 22),
+            fauxAddressBar.heightAnchor.constraint(equalToConstant: 34),
 
             pageClipView.topAnchor.constraint(equalTo: fauxAddressBar.bottomAnchor, constant: 8),
             pageClipView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
