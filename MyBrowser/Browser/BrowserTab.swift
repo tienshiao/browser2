@@ -179,6 +179,18 @@ class BrowserTab: NSObject {
             favicon = nil
             faviconURL = nil
         }
+        // Optimistic favicon fetch for programmatic navigations
+        if let host = url.host, let scheme = url.scheme, scheme != ErrorPage.scheme {
+            if host != previousHost {
+                faviconGeneration += 1
+                let generation = faviconGeneration
+                previousHost = host
+                let optimisticURL = URL(string: "\(scheme)://\(host)/favicon.ico")!
+                downloadFavicon(from: optimisticURL, generation: generation)
+            } else {
+                previousHost = host
+            }
+        }
         updateTitle()
         webView.load(URLRequest(url: url))
     }
