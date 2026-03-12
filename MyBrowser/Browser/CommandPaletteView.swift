@@ -135,8 +135,8 @@ class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource, NS
         boxBottomToScroll = scrollView.bottomAnchor.constraint(equalTo: box.bottomAnchor)
 
         centerXConstraint = shadowContainer.centerXAnchor.constraint(equalTo: safeAreaLayoutGuide.centerXAnchor)
-        centerYConstraint = NSLayoutConstraint(item: shadowContainer, attribute: .centerY, relatedBy: .equal,
-                               toItem: self, attribute: .bottom, multiplier: 0.4, constant: 0)
+        centerYConstraint = NSLayoutConstraint(item: shadowContainer, attribute: .top, relatedBy: .equal,
+                               toItem: self, attribute: .bottom, multiplier: 0.35, constant: 0)
 
         NSLayoutConstraint.activate([
             centerXConstraint,
