@@ -82,6 +82,57 @@ struct HistoryDatabase {
         }
     }
 
+    func recentHistory(spaceID: String, limit: Int = 12) -> [HistoryURL] {
+        do {
+            return try dbQueue.read { db in
+                try HistoryURL.fetchAll(db, sql: """
+                    SELECT h.*
+                    FROM historyURL h
+                    JOIN historyVisit v ON v.urlID = h.id
+                    WHERE v.spaceID = ?
+                    GROUP BY h.url
+                    ORDER BY MAX(v.visitTime) DESC
+                    LIMIT ?
+                    """, arguments: [spaceID, limit])
+            }
+        } catch {
+            print("Failed to fetch recent history: \(error)")
+            return []
+        }
+    }
+
+    func searchHistory(query: String, spaceID: String, limit: Int = 10) -> [HistoryURL] {
+        let tokens = query.components(separatedBy: .whitespaces)
+            .map { $0.replacingOccurrences(of: "\"", with: "")
+                    .replacingOccurrences(of: "'", with: "")
+                    .replacingOccurrences(of: "*", with: "")
+                    .replacingOccurrences(of: "(", with: "")
+                    .replacingOccurrences(of: ")", with: "")
+                    .trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return [] }
+
+        let ftsQuery = tokens.map { "\($0)*" }.joined(separator: " ")
+
+        do {
+            return try dbQueue.read { db in
+                try HistoryURL.fetchAll(db, sql: """
+                    SELECT h.*
+                    FROM historySearch s
+                    JOIN historyURL h ON h.rowid = s.rowid
+                    JOIN historyVisit v ON v.urlID = h.id
+                    WHERE historySearch MATCH ? AND v.spaceID = ?
+                    GROUP BY h.url
+                    ORDER BY rank, -h.visitCount
+                    LIMIT ?
+                    """, arguments: [ftsQuery, spaceID, limit])
+            }
+        } catch {
+            print("Failed to search history: \(error)")
+            return []
+        }
+    }
+
     func expireOldVisits(olderThan maxAge: TimeInterval = 90 * 24 * 3600) {
         do {
             try dbQueue.write { db in

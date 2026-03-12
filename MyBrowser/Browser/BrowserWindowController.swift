@@ -670,6 +670,8 @@ class BrowserWindowController: NSWindowController {
         guard commandPaletteView == nil else { return }
         let palette = CommandPaletteView()
         palette.delegate = self
+        palette.tabStore = store
+        palette.activeSpaceID = activeSpaceID
         commandPaletteView = palette
 
         // Two scrims: the liquid glass sidebar is partially transparent, so we need
@@ -1001,6 +1003,14 @@ extension BrowserWindowController: CommandPaletteDelegate {
 
     func commandPaletteDidDismiss(_ palette: CommandPaletteView) {
         dismissCommandPalette()
+    }
+
+    func commandPalette(_ palette: CommandPaletteView, didRequestSwitchToTab tabID: UUID, in spaceID: UUID) {
+        dismissCommandPalette()
+        if activeSpaceID != spaceID {
+            setActiveSpace(id: spaceID)
+        }
+        selectTab(id: tabID)
     }
 }
 
