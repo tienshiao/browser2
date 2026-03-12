@@ -36,8 +36,7 @@ class TabCellView: NSTableCellView {
     private var trackingArea: NSTrackingArea?
     private var titleTrailingDefault: NSLayoutConstraint!
     private var titleTrailingHover: NSLayoutConstraint!
-    private var titleLeadingToFavicon: NSLayoutConstraint!
-    private var titleLeadingToSpeaker: NSLayoutConstraint!
+    private var titleLeadingConstraint: NSLayoutConstraint!
     private let hoverBackground = NSView()
     var onClose: (() -> Void)?
     var onToggleMute: (() -> Void)?
@@ -63,6 +62,7 @@ class TabCellView: NSTableCellView {
             action: nil
         )
         super.init(frame: frameRect)
+        wantsLayer = true
 
         // Progress bar (Option B) — frame managed in layout(), no constraints
         progressView.wantsLayer = true
@@ -81,6 +81,7 @@ class TabCellView: NSTableCellView {
         faviconImageView.translatesAutoresizingMaskIntoConstraints = false
         faviconImageView.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
 
+        titleLabel.wantsLayer = true
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
@@ -105,8 +106,7 @@ class TabCellView: NSTableCellView {
 
         titleTrailingDefault = titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4)
         titleTrailingHover = titleLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4)
-        titleLeadingToFavicon = titleLabel.leadingAnchor.constraint(equalTo: faviconImageView.trailingAnchor, constant: 8)
-        titleLeadingToSpeaker = titleLabel.leadingAnchor.constraint(equalTo: speakerButton.trailingAnchor, constant: 4)
+        titleLeadingConstraint = titleLabel.leadingAnchor.constraint(equalTo: faviconImageView.trailingAnchor, constant: 8)
 
         NSLayoutConstraint.activate([
             faviconImageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
@@ -119,7 +119,7 @@ class TabCellView: NSTableCellView {
             speakerButton.widthAnchor.constraint(equalToConstant: 16),
             speakerButton.heightAnchor.constraint(equalToConstant: 16),
 
-            titleLeadingToFavicon,
+            titleLeadingConstraint,
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             titleTrailingDefault,
 
@@ -177,33 +177,44 @@ class TabCellView: NSTableCellView {
 
     func updateAudio(isPlaying: Bool, isMuted: Bool) {
         audioPlaying = isPlaying || isMuted
-        if !isPlaying && !isMuted {
-            speakerButton.isHidden = true
-        } else if isMuted {
-            speakerButton.isHidden = false
+
+        // Update icon immediately (no animation needed for icon swap)
+        if isMuted {
             speakerButton.image = NSImage(systemSymbolName: "speaker.slash.fill", accessibilityDescription: "Muted")
-        } else {
-            speakerButton.isHidden = false
+        } else if isPlaying {
             speakerButton.image = NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "Playing Audio")
         }
-        updateLayoutState()
+
+        // Show button before animating in (hide after animating out in completion)
+        if audioPlaying {
+            speakerButton.isHidden = false
+            speakerButton.alphaValue = 0
+        }
+
+        let targetConstant: CGFloat = audioPlaying ? 24 : 8
+
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.2
+            ctx.allowsImplicitAnimation = true
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+
+            self.titleLeadingConstraint.animator().constant = targetConstant
+            self.speakerButton.animator().alphaValue = self.audioPlaying ? 1 : 0
+        }, completionHandler: { [weak self] in
+            guard let self else { return }
+            if !self.audioPlaying {
+                self.speakerButton.isHidden = true
+            }
+        })
     }
 
     private func updateLayoutState() {
-        // Deactivate all optional constraints first to avoid conflicts
-        titleLeadingToFavicon.isActive = false
-        titleLeadingToSpeaker.isActive = false
-        titleTrailingDefault.isActive = false
-        titleTrailingHover.isActive = false
-
-        // Leading: title starts after speaker when audio, after favicon otherwise
-        if audioPlaying {
-            titleLeadingToSpeaker.isActive = true
-        } else {
-            titleLeadingToFavicon.isActive = true
-        }
+        // Leading: 8pt from favicon when no audio, 24pt (4+16+4) when speaker visible
+        titleLeadingConstraint.constant = audioPlaying ? 24 : 8
 
         // Trailing: title ends before close button on hover, at edge otherwise
+        titleTrailingDefault.isActive = false
+        titleTrailingHover.isActive = false
         if isHovered {
             titleTrailingHover.isActive = true
         } else {
