@@ -9,6 +9,13 @@ protocol TabStoreObserver: AnyObject {
     func tabStoreDidReorderTabs(in space: Space)
     func tabStoreDidUpdateTab(_ tab: BrowserTab, at index: Int, in space: Space)
     func tabStoreDidUpdateSpaces()
+
+    // Pinned tab observer methods
+    func tabStoreDidInsertPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space)
+    func tabStoreDidRemovePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space)
+    func tabStoreDidReorderPinnedTabs(in space: Space)
+    func tabStoreDidUpdatePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space)
+    func tabStoreDidResetPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space)
 }
 
 extension TabStoreObserver {
@@ -17,6 +24,11 @@ extension TabStoreObserver {
     func tabStoreDidReorderTabs(in space: Space) {}
     func tabStoreDidUpdateTab(_ tab: BrowserTab, at index: Int, in space: Space) {}
     func tabStoreDidUpdateSpaces() {}
+    func tabStoreDidInsertPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {}
+    func tabStoreDidRemovePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {}
+    func tabStoreDidReorderPinnedTabs(in space: Space) {}
+    func tabStoreDidUpdatePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {}
+    func tabStoreDidResetPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {}
 }
 
 // MARK: - Space
@@ -27,6 +39,7 @@ class Space {
     var emoji: String
     var colorHex: String
     var tabs: [BrowserTab] = []
+    var pinnedTabs: [BrowserTab] = []
     var selectedTabID: UUID?
     let isIncognito: Bool
 
@@ -143,6 +156,29 @@ class TabStore {
             spaces: sessionData,
             lastActiveSpaceID: lastActiveSpaceID?.uuidString
         )
+
+        // Save pinned tabs separately
+        for space in persistentSpaces {
+            var pinnedRecords: [PinnedTabRecord] = []
+            for (i, tab) in space.pinnedTabs.enumerated() {
+                var stateData: Data?
+                if let state = tab.webView.interactionState {
+                    stateData = try? NSKeyedArchiver.archivedData(withRootObject: state, requiringSecureCoding: false)
+                }
+                pinnedRecords.append(PinnedTabRecord(
+                    id: tab.id.uuidString,
+                    spaceID: space.id.uuidString,
+                    pinnedURL: tab.pinnedURL?.absoluteString ?? "",
+                    pinnedTitle: tab.pinnedTitle ?? tab.title,
+                    url: tab.url?.absoluteString,
+                    title: tab.title,
+                    faviconURL: tab.faviconURL?.absoluteString,
+                    interactionState: stateData,
+                    sortOrder: i
+                ))
+            }
+            AppDatabase.shared.savePinnedTabs(pinnedRecords, spaceID: space.id.uuidString)
+        }
     }
 
     /// Restores session. Returns (activeSpaceID, selectedTabID) for the window to use.
@@ -174,6 +210,26 @@ class TabStore {
                 space.tabs.append(tab)
                 self.subscribeToTab(tab, spaceID: spaceID)
             }
+
+            // Load pinned tabs
+            let pinnedRecords = AppDatabase.shared.loadPinnedTabs(spaceID: spaceRecord.id)
+            for pinnedRecord in pinnedRecords {
+                guard let tabID = UUID(uuidString: pinnedRecord.id) else { continue }
+                let tab = BrowserTab(
+                    id: tabID,
+                    title: pinnedRecord.title ?? pinnedRecord.pinnedTitle,
+                    archivedInteractionState: pinnedRecord.interactionState,
+                    fallbackURL: pinnedRecord.url.flatMap { URL(string: $0) } ?? URL(string: pinnedRecord.pinnedURL),
+                    faviconURL: pinnedRecord.faviconURL.flatMap { URL(string: $0) },
+                    configuration: space.makeWebViewConfiguration()
+                )
+                tab.isPinned = true
+                tab.pinnedURL = URL(string: pinnedRecord.pinnedURL)
+                tab.pinnedTitle = pinnedRecord.pinnedTitle
+                space.pinnedTabs.append(tab)
+                self.subscribeToTab(tab, spaceID: spaceID)
+            }
+
             self.spaces.append(space)
         }
 
@@ -252,6 +308,9 @@ class TabStore {
               let index = spaces.firstIndex(where: { $0.id == id }) else { return }
         let space = spaces.remove(at: index)
         for tab in space.tabs {
+            tabSubscriptions.removeValue(forKey: tab.id)
+        }
+        for tab in space.pinnedTabs {
             tabSubscriptions.removeValue(forKey: tab.id)
         }
         // Clean up closed tab records for this space
@@ -368,6 +427,60 @@ class TabStore {
         scheduleSave()
     }
 
+    // MARK: - Pinned Tab Mutations
+
+    func pinTab(id: UUID, in space: Space, at destinationIndex: Int? = nil) {
+        guard let index = space.tabs.firstIndex(where: { $0.id == id }) else { return }
+        let tab = space.tabs.remove(at: index)
+        tab.isPinned = true
+        tab.pinnedURL = tab.url
+        tab.pinnedTitle = tab.title
+        let insertAt = min(destinationIndex ?? space.pinnedTabs.count, space.pinnedTabs.count)
+        space.pinnedTabs.insert(tab, at: insertAt)
+        notifyObservers { $0.tabStoreDidRemoveTab(tab, at: index, in: space) }
+        notifyObservers { $0.tabStoreDidInsertPinnedTab(tab, at: insertAt, in: space) }
+        scheduleSave()
+    }
+
+    func unpinTab(id: UUID, in space: Space, at destinationIndex: Int? = nil) {
+        guard let index = space.pinnedTabs.firstIndex(where: { $0.id == id }) else { return }
+        let tab = space.pinnedTabs.remove(at: index)
+        tab.isPinned = false
+        tab.pinnedURL = nil
+        tab.pinnedTitle = nil
+        let insertAt = min(destinationIndex ?? 0, space.tabs.count)
+        space.tabs.insert(tab, at: insertAt)
+        notifyObservers { $0.tabStoreDidRemovePinnedTab(tab, at: index, in: space) }
+        notifyObservers { $0.tabStoreDidInsertTab(tab, at: insertAt, in: space) }
+        scheduleSave()
+    }
+
+    func closePinnedTab(id: UUID, in space: Space) {
+        guard let index = space.pinnedTabs.firstIndex(where: { $0.id == id }) else { return }
+        let tab = space.pinnedTabs[index]
+        if tab.isAtPinnedHome {
+            // Fully remove
+            tabSubscriptions.removeValue(forKey: tab.id)
+            space.pinnedTabs.remove(at: index)
+            notifyObservers { $0.tabStoreDidRemovePinnedTab(tab, at: index, in: space) }
+        } else {
+            // Reset to pinned home
+            tab.resetToPinnedHome()
+            notifyObservers { $0.tabStoreDidResetPinnedTab(tab, at: index, in: space) }
+        }
+        scheduleSave()
+    }
+
+    func movePinnedTab(from sourceIndex: Int, to destinationIndex: Int, in space: Space) {
+        guard sourceIndex != destinationIndex,
+              sourceIndex >= 0, sourceIndex < space.pinnedTabs.count,
+              destinationIndex >= 0, destinationIndex < space.pinnedTabs.count else { return }
+        let tab = space.pinnedTabs.remove(at: sourceIndex)
+        space.pinnedTabs.insert(tab, at: destinationIndex)
+        notifyObservers { $0.tabStoreDidReorderPinnedTabs(in: space) }
+        scheduleSave()
+    }
+
     // MARK: - Reopen Closed Tab
 
     func canReopenClosedTab(in space: Space) -> Bool {
@@ -409,9 +522,13 @@ class TabStore {
         let notify: (BrowserTab) -> Void = { [weak self] tab in
             guard let self else { return }
             for space in self.spaces {
+                if let index = space.pinnedTabs.firstIndex(where: { $0.id == tab.id }) {
+                    self.notifyObservers { $0.tabStoreDidUpdatePinnedTab(tab, at: index, in: space) }
+                    return
+                }
                 if let index = space.tabs.firstIndex(where: { $0.id == tab.id }) {
                     self.notifyObservers { $0.tabStoreDidUpdateTab(tab, at: index, in: space) }
-                    break
+                    return
                 }
             }
         }

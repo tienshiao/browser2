@@ -39,6 +39,8 @@ class BrowserWindowController: NSWindowController {
     private(set) var isIncognito = false
     private var incognitoSpaceID: UUID?
 
+    private var peekOverlayView: PeekOverlayView?
+
     private var store: TabStore { TabStore.shared }
 
     // MARK: - Per-window space state
@@ -56,7 +58,8 @@ class BrowserWindowController: NSWindowController {
 
     private var selectedTab: BrowserTab? {
         guard let selectedTabID else { return nil }
-        return currentTabs.first { $0.id == selectedTabID }
+        return activeSpace?.pinnedTabs.first { $0.id == selectedTabID }
+            ?? currentTabs.first { $0.id == selectedTabID }
     }
 
     convenience init(incognito: Bool) {
@@ -106,6 +109,7 @@ class BrowserWindowController: NSWindowController {
             window.title = "Private Browsing"
         } else {
             tabSidebar.activeSpaceID = activeSpaceID
+            tabSidebar.pinnedTabs = activeSpace?.pinnedTabs ?? []
             tabSidebar.tabs = currentTabs
 
             // Apply initial space UI
@@ -137,20 +141,24 @@ class BrowserWindowController: NSWindowController {
         // Save current tab selection for the old space
         activeSpace?.selectedTabID = selectedTabID
 
+        // Dismiss peek overlay on space switch
+        dismissPeekOverlay()
+
         activeSpaceID = id
         tabSidebar.activeSpaceID = id
         if !isIncognito {
             store.lastActiveSpaceID = id
         }
 
-        tabSidebar.tabs = space.tabs
+        tabSidebar.setTabs(pinned: space.pinnedTabs, normal: space.tabs)
         tabSidebar.tintColor = space.color
         tabSidebar.updateSpaceButtons(spaces: store.spaces, activeSpaceID: id)
 
         // Restore the new space's selected tab
-        if let savedTabID = space.selectedTabID, space.tabs.contains(where: { $0.id == savedTabID }) {
+        if let savedTabID = space.selectedTabID,
+           space.tabs.contains(where: { $0.id == savedTabID }) || space.pinnedTabs.contains(where: { $0.id == savedTabID }) {
             selectTab(id: savedTabID)
-        } else if let firstTab = space.tabs.first {
+        } else if let firstTab = space.pinnedTabs.first ?? space.tabs.first {
             selectTab(id: firstTab.id)
         } else {
             deselectAllTabs()
@@ -425,7 +433,7 @@ class BrowserWindowController: NSWindowController {
         let topOffset: CGFloat = findBar.isHidden ? 0 : findBar.frame.height
         let bounds = contentContainerView.bounds
 
-        for subview in contentContainerView.subviews where subview !== findBar && subview !== dragHandle {
+        for subview in contentContainerView.subviews where subview !== findBar && subview !== dragHandle && !(subview is PeekOverlayView) {
             if subview is WKWebView {
                 subview.frame = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height - topOffset)
             } else if subview is NSImageView {
@@ -443,9 +451,12 @@ class BrowserWindowController: NSWindowController {
     // MARK: - Tab Selection & WebView Ownership
 
     func selectTab(id: UUID) {
-        guard currentTabs.contains(where: { $0.id == id }) else { return }
+        let isPinnedTab = activeSpace?.pinnedTabs.contains(where: { $0.id == id }) ?? false
+        let isNormalTab = currentTabs.contains(where: { $0.id == id })
+        guard isPinnedTab || isNormalTab else { return }
 
         dismissCommandPalette()
+        dismissPeekOverlay()
 
         if let previousTab = selectedTab {
             if ownsWebView {
@@ -459,7 +470,7 @@ class BrowserWindowController: NSWindowController {
         activeTabSubscriptions.removeAll()
         dragHandle.isHidden = false
 
-        guard let tab = currentTabs.first(where: { $0.id == id }) else { return }
+        guard let tab = selectedTab else { return }
 
         tab.$url
             .receive(on: RunLoop.main)
@@ -489,7 +500,9 @@ class BrowserWindowController: NSWindowController {
             }
             .store(in: &activeTabSubscriptions)
 
-        if let index = currentTabs.firstIndex(where: { $0.id == id }) {
+        if let index = activeSpace?.pinnedTabs.firstIndex(where: { $0.id == id }) {
+            tabSidebar.selectedPinnedTabIndex = index
+        } else if let index = currentTabs.firstIndex(where: { $0.id == id }) {
             tabSidebar.selectedTabIndex = index
         }
 
@@ -572,7 +585,7 @@ class BrowserWindowController: NSWindowController {
     }
 
     private func removeContentViews() {
-        for subview in contentContainerView.subviews where subview !== findBar && subview !== dragHandle {
+        for subview in contentContainerView.subviews where subview !== findBar && subview !== dragHandle && subview !== peekOverlayView {
             subview.removeFromSuperview()
         }
         snapshotImageView = nil
@@ -733,13 +746,55 @@ class BrowserWindowController: NSWindowController {
     }
 
     @objc func closeCurrentTab(_ sender: Any?) {
+        // If peek overlay is showing, dismiss it instead of closing the tab
+        if peekOverlayView != nil {
+            dismissPeekOverlay()
+            return
+        }
+
         guard let id = selectedTabID else {
             window?.performClose(sender)
             return
         }
+
+        guard let space = activeSpace else { return }
+
+        // Check if it's a pinned tab
+        if let index = space.pinnedTabs.firstIndex(where: { $0.id == id }) {
+            closePinnedTab(at: index)
+            return
+        }
+
         let tabs = currentTabs
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         closeTab(at: index, wasSelected: true)
+    }
+
+    private func closePinnedTab(at index: Int) {
+        guard let space = activeSpace else { return }
+        let tab = space.pinnedTabs[index]
+
+        if tab.isAtPinnedHome {
+            // Fully remove — select next tab
+            let allTabs = space.pinnedTabs + space.tabs
+            let nextID: UUID?
+            if let currentIndex = allTabs.firstIndex(where: { $0.id == tab.id }) {
+                if allTabs.count > 1 {
+                    nextID = allTabs[currentIndex == allTabs.count - 1 ? currentIndex - 1 : currentIndex + 1].id
+                } else {
+                    nextID = nil
+                }
+            } else {
+                nextID = nil
+            }
+            store.closePinnedTab(id: tab.id, in: space)
+            if let nextID { selectTab(id: nextID) }
+            else { deselectAllTabs() }
+        } else {
+            // Reset to home — tab stays, select next
+            store.closePinnedTab(id: tab.id, in: space)
+            // Tab remains pinned, select it if it was selected (it resets to home)
+        }
     }
 
     private func closeTab(at index: Int, wasSelected: Bool) {
@@ -755,8 +810,71 @@ class BrowserWindowController: NSWindowController {
 
         if wasSelected {
             if let nextID { selectTab(id: nextID) }
+            else if let firstPinned = space.pinnedTabs.first { selectTab(id: firstPinned.id) }
             else { deselectAllTabs() }
         }
+    }
+
+    // MARK: - Pin/Unpin
+
+    @objc func togglePinTab(_ sender: Any?) {
+        guard let tab = selectedTab, let space = activeSpace else { return }
+        if tab.isPinned {
+            store.unpinTab(id: tab.id, in: space)
+            selectTab(id: tab.id)
+        } else {
+            guard tab.url != nil else { return }
+            store.pinTab(id: tab.id, in: space)
+            selectTab(id: tab.id)
+        }
+    }
+
+    // MARK: - Peek Overlay
+
+    private func showPeekOverlay(url: URL) {
+        guard let space = activeSpace else { return }
+        dismissPeekOverlay()
+
+        let config = space.makeWebViewConfiguration()
+        let peekWebView = WKWebView(frame: .zero, configuration: config)
+        peekWebView.navigationDelegate = self
+        peekWebView.isInspectable = true
+
+        let overlay = PeekOverlayView(peekWebView: peekWebView)
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        overlay.onClose = { [weak self] in
+            self?.dismissPeekOverlay()
+        }
+        overlay.onExpand = { [weak self] in
+            self?.expandPeekToNewTab()
+        }
+
+        contentContainerView.addSubview(overlay)
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: contentContainerView.topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: contentContainerView.bottomAnchor),
+            overlay.leadingAnchor.constraint(equalTo: contentContainerView.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: contentContainerView.trailingAnchor),
+        ])
+
+        peekWebView.load(URLRequest(url: url))
+        peekOverlayView = overlay
+    }
+
+    private func dismissPeekOverlay() {
+        peekOverlayView?.removeFromSuperview()
+        peekOverlayView = nil
+    }
+
+    private func expandPeekToNewTab() {
+        guard let peekURL = peekOverlayView?.peekWebView.url,
+              let space = activeSpace else {
+            dismissPeekOverlay()
+            return
+        }
+        dismissPeekOverlay()
+        let tab = store.addTab(in: space, url: peekURL, afterTabID: selectedTabID)
+        selectTab(id: tab.id)
     }
 
     // MARK: - Add Space Popover
@@ -807,6 +925,12 @@ extension BrowserWindowController: NSMenuItemValidation {
             guard let space = activeSpace else { return false }
             return store.canReopenClosedTab(in: space)
         }
+        if menuItem.action == #selector(togglePinTab(_:)) {
+            guard let tab = selectedTab else { return false }
+            menuItem.title = tab.isPinned ? "Unpin Tab" : "Pin Tab"
+            if !tab.isPinned && tab.url == nil { return false }
+            return true
+        }
         return true
     }
 }
@@ -827,6 +951,7 @@ extension BrowserWindowController: NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        dismissPeekOverlay()
         if ownsWebView, let tab = selectedTab {
             tab.takeSnapshot()
         }
@@ -893,10 +1018,43 @@ extension BrowserWindowController: TabSidebarDelegate {
         toggleSidebarAutoHide()
     }
 
+    func tabSidebar(_ sidebar: TabSidebarViewController, didSelectPinnedTabAt index: Int) {
+        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
+        selectTab(id: space.pinnedTabs[index].id)
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestClosePinnedTabAt index: Int) {
+        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
+        let tab = space.pinnedTabs[index]
+        let wasSelected = tab.id == selectedTabID
+        if wasSelected {
+            closePinnedTab(at: index)
+        } else {
+            store.closePinnedTab(id: tab.id, in: space)
+        }
+    }
+
     func tabSidebar(_ sidebar: TabSidebarViewController, didMoveTabFrom sourceIndex: Int, to destinationIndex: Int) {
         guard let space = activeSpace else { return }
         let adjustedDestination = sourceIndex < destinationIndex ? destinationIndex - 1 : destinationIndex
         store.moveTab(from: sourceIndex, to: adjustedDestination, in: space)
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didMovePinnedTabFrom sourceIndex: Int, to destinationIndex: Int) {
+        guard let space = activeSpace else { return }
+        store.movePinnedTab(from: sourceIndex, to: destinationIndex, in: space)
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didDragTabToPinAt index: Int, destinationIndex: Int) {
+        guard let space = activeSpace, index >= 0, index < space.tabs.count else { return }
+        let tab = space.tabs[index]
+        guard tab.url != nil else { return }
+        store.pinTab(id: tab.id, in: space, at: destinationIndex)
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didDragPinnedTabToUnpinAt index: Int, destinationIndex: Int) {
+        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
+        store.unpinTab(id: space.pinnedTabs[index].id, in: space, at: destinationIndex)
     }
 
     func tabSidebarDidRequestSwitchToSpace(_ sidebar: TabSidebarViewController, spaceID: UUID) {
@@ -922,7 +1080,7 @@ extension BrowserWindowController: TabSidebarDelegate {
     func tabSidebarDidRequestDeleteSpace(_ sidebar: TabSidebarViewController, spaceID: UUID) {
         guard let space = store.space(withID: spaceID) else { return }
 
-        if !space.tabs.isEmpty {
+        if !space.tabs.isEmpty || !space.pinnedTabs.isEmpty {
             let alert = NSAlert()
             alert.messageText = "Cannot Delete Space"
             alert.informativeText = "Close or move all tabs first before deleting this space."
@@ -954,17 +1112,17 @@ extension BrowserWindowController: TabSidebarDelegate {
 extension BrowserWindowController: TabStoreObserver {
     func tabStoreDidInsertTab(_ tab: BrowserTab, at index: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.tabs = currentTabs
+        tabSidebar.setTabs(pinned: space.pinnedTabs, normal: space.tabs)
     }
 
     func tabStoreDidRemoveTab(_ tab: BrowserTab, at index: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.tabs = currentTabs
+        tabSidebar.setTabs(pinned: space.pinnedTabs, normal: space.tabs)
     }
 
     func tabStoreDidReorderTabs(in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.tabs = currentTabs
+        tabSidebar.setTabs(pinned: space.pinnedTabs, normal: space.tabs)
         if let selectedTabID, let index = currentTabs.firstIndex(where: { $0.id == selectedTabID }) {
             tabSidebar.selectedTabIndex = index
         }
@@ -973,6 +1131,37 @@ extension BrowserWindowController: TabStoreObserver {
     func tabStoreDidUpdateTab(_ tab: BrowserTab, at index: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
         tabSidebar.reloadTab(at: index)
+    }
+
+    // Pinned tab observer methods
+
+    func tabStoreDidInsertPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
+        guard space.id == activeSpaceID else { return }
+        // Both arrays may have changed (tab moved between them), update atomically
+        tabSidebar.setTabs(pinned: space.pinnedTabs, normal: space.tabs)
+    }
+
+    func tabStoreDidRemovePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
+        guard space.id == activeSpaceID else { return }
+        tabSidebar.setTabs(pinned: space.pinnedTabs, normal: space.tabs)
+    }
+
+    func tabStoreDidReorderPinnedTabs(in space: Space) {
+        guard space.id == activeSpaceID else { return }
+        tabSidebar.pinnedTabs = space.pinnedTabs
+        if let selectedTabID, let index = space.pinnedTabs.firstIndex(where: { $0.id == selectedTabID }) {
+            tabSidebar.selectedPinnedTabIndex = index
+        }
+    }
+
+    func tabStoreDidUpdatePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
+        guard space.id == activeSpaceID else { return }
+        tabSidebar.reloadPinnedTab(at: index)
+    }
+
+    func tabStoreDidResetPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
+        guard space.id == activeSpaceID else { return }
+        tabSidebar.reloadPinnedTab(at: index)
     }
 
     func tabStoreDidUpdateSpaces() {
@@ -1061,6 +1250,22 @@ extension BrowserWindowController: WKNavigationDelegate {
 
         if navigationAction.shouldPerformDownload {
             return .download
+        }
+
+        // Peek mode: intercept cross-host navigation on pinned tabs
+        // Only intercept on the pinned tab's own webView, not the peek webView
+        if let tab = selectedTab, tab.isPinned,
+           webView === tab.webView,
+           peekOverlayView == nil,
+           let url = navigationAction.request.url,
+           let pinnedHost = tab.pinnedURL?.host,
+           let targetHost = url.host,
+           targetHost != pinnedHost,
+           navigationAction.navigationType == .linkActivated {
+            DispatchQueue.main.async { [weak self] in
+                self?.showPeekOverlay(url: url)
+            }
+            return .cancel
         }
 
         return .allow

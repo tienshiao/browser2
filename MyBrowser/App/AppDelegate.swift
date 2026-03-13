@@ -127,6 +127,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         fileMenu.addItem(withTitle: "Close Tab", action: #selector(BrowserWindowController.closeCurrentTab(_:)), keyEquivalent: "w")
         let reopenItem = fileMenu.addItem(withTitle: "Reopen Closed Tab", action: #selector(BrowserWindowController.reopenClosedTab(_:)), keyEquivalent: "t")
         reopenItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(withTitle: "Pin/Unpin Tab", action: #selector(BrowserWindowController.togglePinTab(_:)), keyEquivalent: "d")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "New Window", action: #selector(createNewWindow), keyEquivalent: "n")
         let privateWindowItem = fileMenu.addItem(withTitle: "New Private Window", action: #selector(createNewIncognitoWindow), keyEquivalent: "n")

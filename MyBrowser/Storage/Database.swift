@@ -153,6 +153,37 @@ struct AppDatabase {
         }
     }
 
+    // MARK: - Pinned Tabs
+
+    func savePinnedTabs(_ records: [PinnedTabRecord], spaceID: String) {
+        do {
+            try dbQueue.write { db in
+                try PinnedTabRecord
+                    .filter(Column("spaceID") == spaceID)
+                    .deleteAll(db)
+                for record in records {
+                    try record.insert(db)
+                }
+            }
+        } catch {
+            print("Failed to save pinned tabs: \(error)")
+        }
+    }
+
+    func loadPinnedTabs(spaceID: String) -> [PinnedTabRecord] {
+        do {
+            return try dbQueue.read { db in
+                try PinnedTabRecord
+                    .filter(Column("spaceID") == spaceID)
+                    .order(Column("sortOrder"))
+                    .fetchAll(db)
+            }
+        } catch {
+            print("Failed to load pinned tabs: \(error)")
+            return []
+        }
+    }
+
     func loadSession() -> (spaces: [(SpaceRecord, [TabRecord])], lastActiveSpaceID: String?)? {
         do {
             return try dbQueue.read { db in
@@ -232,6 +263,21 @@ struct AppDatabase {
                 t.column("state", .text).notNull()
                 t.column("createdAt", .datetime).notNull()
                 t.column("completedAt", .datetime)
+            }
+        }
+
+        migrator.registerMigration("v4") { db in
+            try db.create(table: "pinnedTab") { t in
+                t.primaryKey("id", .text)
+                t.column("spaceID", .text).notNull()
+                    .references("space", onDelete: .cascade)
+                t.column("pinnedURL", .text).notNull()
+                t.column("pinnedTitle", .text).notNull()
+                t.column("url", .text)
+                t.column("title", .text)
+                t.column("faviconURL", .text)
+                t.column("interactionState", .blob)
+                t.column("sortOrder", .integer).notNull()
             }
         }
 

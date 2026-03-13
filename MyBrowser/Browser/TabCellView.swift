@@ -334,9 +334,41 @@ class TabCellView: NSTableCellView {
         })
     }
 
+    func updatePinnedMode(tab: BrowserTab?) {
+        guard let tab, tab.isPinned else {
+            // Normal tab: use xmark
+            closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
+            return
+        }
+        if tab.isNavigatedWithinPinnedHost {
+            closeButton.image = NSImage(systemSymbolName: "minus", accessibilityDescription: "Reset to Home")
+        } else {
+            closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
+        }
+    }
+
     @objc private func closeTapped() {
         onClose?()
     }
+}
+
+class SeparatorCellView: NSTableCellView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        let line = NSView()
+        line.wantsLayer = true
+        line.layer?.backgroundColor = NSColor.tertiaryLabelColor.cgColor
+        line.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(line)
+        NSLayoutConstraint.activate([
+            line.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            line.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            line.centerYAnchor.constraint(equalTo: centerYAnchor),
+            line.heightAnchor.constraint(equalToConstant: 1),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
 }
 
 class NewTabCellView: NSTableCellView {
