@@ -149,7 +149,15 @@ class BrowserTab: NSObject {
             .store(in: &faviconCancellables)
 
         webView.publisher(for: \.isLoading)
-            .assign(to: &$isLoading)
+            .sink { [weak self] loading in
+                guard let self else { return }
+                self.isLoading = loading
+                if !loading && self.navigationPending {
+                    self.navigationPending = false
+                    self.updateTitle()
+                }
+            }
+            .store(in: &faviconCancellables)
 
         webView.publisher(for: \.canGoBack)
             .assign(to: &$canGoBack)
