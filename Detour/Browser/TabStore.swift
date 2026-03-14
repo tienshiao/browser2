@@ -170,10 +170,7 @@ class TabStore {
 
             var tabRecords: [TabRecord] = []
             for (tabIndex, tab) in space.tabs.enumerated() {
-                var stateData: Data?
-                if let state = tab.webView.interactionState {
-                    stateData = try? NSKeyedArchiver.archivedData(withRootObject: state, requiringSecureCoding: false)
-                }
+                let stateData = tab.currentInteractionStateData()
                 tabRecords.append(TabRecord(
                     id: tab.id.uuidString,
                     spaceID: space.id.uuidString,
@@ -197,10 +194,7 @@ class TabStore {
         for space in persistentSpaces {
             var pinnedRecords: [PinnedTabRecord] = []
             for (i, tab) in space.pinnedTabs.enumerated() {
-                var stateData: Data?
-                if let state = tab.webView.interactionState {
-                    stateData = try? NSKeyedArchiver.archivedData(withRootObject: state, requiringSecureCoding: false)
-                }
+                let stateData = tab.currentInteractionStateData()
                 pinnedRecords.append(PinnedTabRecord(
                     id: tab.id.uuidString,
                     spaceID: space.id.uuidString,
@@ -235,19 +229,30 @@ class TabStore {
 
             for tabRecord in tabRecords {
                 guard let tabID = UUID(uuidString: tabRecord.id) else { continue }
-                let tab = BrowserTab(
-                    id: tabID,
-                    title: tabRecord.title,
-                    archivedInteractionState: tabRecord.interactionState,
-                    fallbackURL: tabRecord.url.flatMap { URL(string: $0) },
-                    faviconURL: tabRecord.faviconURL.flatMap { URL(string: $0) },
-                    configuration: space.makeWebViewConfiguration()
-                )
-                if space.selectedTabID == tabID {
+                let isSelected = space.selectedTabID == tabID
+                let tab: BrowserTab
+                if isSelected {
+                    tab = BrowserTab(
+                        id: tabID,
+                        title: tabRecord.title,
+                        archivedInteractionState: tabRecord.interactionState,
+                        fallbackURL: tabRecord.url.flatMap { URL(string: $0) },
+                        faviconURL: tabRecord.faviconURL.flatMap { URL(string: $0) },
+                        configuration: space.makeWebViewConfiguration()
+                    )
                     tab.lastDeselectedAt = nil
                 } else {
+                    tab = BrowserTab(
+                        id: tabID,
+                        title: tabRecord.title,
+                        url: tabRecord.url.flatMap { URL(string: $0) },
+                        faviconURL: tabRecord.faviconURL.flatMap { URL(string: $0) },
+                        cachedInteractionState: tabRecord.interactionState,
+                        spaceID: spaceID
+                    )
                     tab.lastDeselectedAt = tabRecord.lastDeselectedAt.map { Date(timeIntervalSince1970: $0) } ?? Date()
                 }
+                tab.spaceID = spaceID
                 space.tabs.append(tab)
                 self.subscribeToTab(tab, spaceID: spaceID)
             }
@@ -256,17 +261,31 @@ class TabStore {
             let pinnedRecords = AppDatabase.shared.loadPinnedTabs(spaceID: spaceRecord.id)
             for pinnedRecord in pinnedRecords {
                 guard let tabID = UUID(uuidString: pinnedRecord.id) else { continue }
-                let tab = BrowserTab(
-                    id: tabID,
-                    title: pinnedRecord.title ?? pinnedRecord.pinnedTitle,
-                    archivedInteractionState: pinnedRecord.interactionState,
-                    fallbackURL: pinnedRecord.url.flatMap { URL(string: $0) } ?? URL(string: pinnedRecord.pinnedURL),
-                    faviconURL: pinnedRecord.faviconURL.flatMap { URL(string: $0) },
-                    configuration: space.makeWebViewConfiguration()
-                )
+                let isSelected = space.selectedTabID == tabID
+                let tab: BrowserTab
+                if isSelected {
+                    tab = BrowserTab(
+                        id: tabID,
+                        title: pinnedRecord.title ?? pinnedRecord.pinnedTitle,
+                        archivedInteractionState: pinnedRecord.interactionState,
+                        fallbackURL: pinnedRecord.url.flatMap { URL(string: $0) } ?? URL(string: pinnedRecord.pinnedURL),
+                        faviconURL: pinnedRecord.faviconURL.flatMap { URL(string: $0) },
+                        configuration: space.makeWebViewConfiguration()
+                    )
+                } else {
+                    tab = BrowserTab(
+                        id: tabID,
+                        title: pinnedRecord.title ?? pinnedRecord.pinnedTitle,
+                        url: pinnedRecord.url.flatMap { URL(string: $0) } ?? URL(string: pinnedRecord.pinnedURL),
+                        faviconURL: pinnedRecord.faviconURL.flatMap { URL(string: $0) },
+                        cachedInteractionState: pinnedRecord.interactionState,
+                        spaceID: spaceID
+                    )
+                }
                 tab.isPinned = true
                 tab.pinnedURL = URL(string: pinnedRecord.pinnedURL)
                 tab.pinnedTitle = pinnedRecord.pinnedTitle
+                tab.spaceID = spaceID
                 space.pinnedTabs.append(tab)
                 self.subscribeToTab(tab, spaceID: spaceID)
             }
@@ -403,6 +422,7 @@ class TabStore {
     @discardableResult
     func addTab(in space: Space, url: URL? = nil, afterTabID: UUID? = nil) -> BrowserTab {
         let tab = BrowserTab(configuration: space.makeWebViewConfiguration())
+        tab.spaceID = space.id
 
         let insertionIndex: Int
         if let afterTabID, let afterIndex = space.tabs.firstIndex(where: { $0.id == afterTabID }) {
@@ -427,6 +447,7 @@ class TabStore {
     @discardableResult
     func addTab(in space: Space, webView: WKWebView, afterTabID: UUID? = nil) -> BrowserTab {
         let tab = BrowserTab(webView: webView)
+        tab.spaceID = space.id
 
         let insertionIndex: Int
         if let afterTabID, let afterIndex = space.tabs.firstIndex(where: { $0.id == afterTabID }) {
@@ -449,10 +470,7 @@ class TabStore {
 
         // Archive to closed tab stack (skip incognito)
         if !space.isIncognito {
-            var stateData: Data?
-            if let state = tab.webView.interactionState {
-                stateData = try? NSKeyedArchiver.archivedData(withRootObject: state, requiringSecureCoding: false)
-            }
+            let stateData = tab.currentInteractionStateData()
             let record = ClosedTabRecord(
                 id: nil,
                 tabID: tab.id.uuidString,
@@ -564,6 +582,7 @@ class TabStore {
             faviconURL: record.faviconURL.flatMap { URL(string: $0) },
             configuration: space.makeWebViewConfiguration()
         )
+        tab.spaceID = space.id
 
         let insertionIndex = min(record.sortOrder, space.tabs.count)
         space.tabs.insert(tab, at: insertionIndex)
@@ -576,8 +595,7 @@ class TabStore {
     // MARK: - Tab Archiving
 
     enum ArchiveThreshold: TimeInterval, CaseIterable {
-//        case twelveHours = 43200
-        case twelveHours = 3600
+        case twelveHours = 43200
         case twentyFourHours = 86400
         case sevenDays = 604800
         case thirtyDays = 2592000
@@ -590,8 +608,22 @@ class TabStore {
     func startArchiveTimer() {
         archiveTimer?.invalidate()
         archiveTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            self?.sleepStaleTabs()
             self?.archiveStaleTabs()
         }
+    }
+
+    private func sleepStaleTabs() {
+        let cutoff = Date().addingTimeInterval(-3600) // 1 hour
+        for space in spaces {
+            for tab in space.tabs + space.pinnedTabs {
+                guard !tab.isSleeping, !tab.isPinned, !tab.isPlayingAudio,
+                      let lastDeselected = tab.lastDeselectedAt,
+                      lastDeselected < cutoff else { continue }
+                tab.sleep()
+            }
+        }
+        scheduleSave()
     }
 
     private func archiveStaleTabs() {

@@ -4,11 +4,12 @@ import Combine
 
 class BrowserTab: NSObject {
     let id: UUID
-    let webView: WKWebView
+    private(set) var webView: WKWebView?
 
     @Published var title: String = "New Tab"
     @Published var url: URL?
     @Published var isLoading: Bool = false
+    @Published var isSleeping: Bool = false
     @Published var isPlayingAudio: Bool = false
     @Published var isMuted: Bool = false
     @Published var canGoBack: Bool = false
@@ -17,6 +18,8 @@ class BrowserTab: NSObject {
     @Published var latestSnapshot: NSImage?
     @Published var favicon: NSImage?
     private(set) var faviconURL: URL?
+    var spaceID: UUID?
+    private var cachedInteractionState: Data?
 
     // MARK: - Archiving
 
@@ -32,7 +35,7 @@ class BrowserTab: NSObject {
         guard isPinned, let pinnedTitle else { return title }
         if isAtPinnedHome { return pinnedTitle }
         if isNavigatedWithinPinnedHost {
-            let pageTitle = webView.title ?? title
+            let pageTitle = webView?.title ?? title
             return "/ \(pageTitle)"
         }
         return title
@@ -68,7 +71,7 @@ class BrowserTab: NSObject {
         }
         self.webView = BrowserWebView(frame: .zero, configuration: configuration)
         super.init()
-        self.webView.isInspectable = true
+        self.webView?.isInspectable = true
         applyUserAgent()
         setupObservers()
         NotificationCenter.default.addObserver(self, selector: #selector(userAgentDidChange), name: .init("UserAgentDidChange"), object: nil)
@@ -79,7 +82,7 @@ class BrowserTab: NSObject {
         self.id = id
         self.webView = webView
         super.init()
-        self.webView.isInspectable = true
+        self.webView?.isInspectable = true
         // Seed published properties from the existing webView state
         self.url = webView.url
         if let t = webView.title, !t.isEmpty { self.title = t }
@@ -90,6 +93,25 @@ class BrowserTab: NSObject {
         if !webView.isLoading {
             fetchFavicon()
         }
+    }
+
+    /// Creates a sleeping tab that retains metadata but has no WebView.
+    init(id: UUID, title: String, url: URL?, faviconURL: URL?,
+         cachedInteractionState: Data?, spaceID: UUID) {
+        self.id = id
+        self.webView = nil
+        self.isSleeping = true
+        self.cachedInteractionState = cachedInteractionState
+        self.spaceID = spaceID
+        super.init()
+        self.title = title
+        self.url = url
+        if let faviconURL {
+            self.faviconURL = faviconURL
+            self.previousHost = url?.host
+            downloadFavicon(from: faviconURL, generation: self.faviconGeneration)
+        }
+        NotificationCenter.default.addObserver(self, selector: #selector(userAgentDidChange), name: .init("UserAgentDidChange"), object: nil)
     }
 
     convenience init(id: UUID, title: String, archivedInteractionState: Data?, fallbackURL: URL?, faviconURL: URL? = nil, configuration: WKWebViewConfiguration = WKWebViewConfiguration()) {
@@ -103,13 +125,14 @@ class BrowserTab: NSObject {
         self.url = fallbackURL
         if let archivedInteractionState,
            let state = try? NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(archivedInteractionState) {
-            webView.interactionState = state
+            webView?.interactionState = state
         } else if let fallbackURL {
             load(fallbackURL)
         }
     }
 
     func takeSnapshot(completion: ((NSImage?) -> Void)? = nil) {
+        guard let webView else { completion?(nil); return }
         webView.takeSnapshot(with: nil) { [weak self] image, _ in
             self?.latestSnapshot = image
             completion?(image)
@@ -117,18 +140,18 @@ class BrowserTab: NSObject {
     }
 
     deinit {
-        webView.removeObserver(self, forKeyPath: "_isPlayingAudio")
+        webView?.removeObserver(self, forKeyPath: "_isPlayingAudio")
         NotificationCenter.default.removeObserver(self, name: .init("UserAgentDidChange"), object: nil)
     }
 
     private func applyUserAgent() {
         switch UserAgentMode.current {
         case .detour:
-            webView.customUserAgent = "\(UserAgentMode.safariUserAgent) \(UserAgentMode.detourAppName)"
+            webView?.customUserAgent = "\(UserAgentMode.safariUserAgent) \(UserAgentMode.detourAppName)"
         case .safari:
-            webView.customUserAgent = UserAgentMode.safariUserAgent
+            webView?.customUserAgent = UserAgentMode.safariUserAgent
         case .custom:
-            webView.customUserAgent = UserDefaults.standard.string(forKey: "customUserAgent") ?? ""
+            webView?.customUserAgent = UserDefaults.standard.string(forKey: "customUserAgent") ?? ""
         }
     }
 
@@ -137,6 +160,7 @@ class BrowserTab: NSObject {
     }
 
     func toggleMute() {
+        guard let webView else { return }
         isMuted.toggle()
         let js = "document.querySelectorAll('video, audio').forEach(el => el.muted = \(isMuted))"
         webView.evaluateJavaScript(js)
@@ -153,6 +177,8 @@ class BrowserTab: NSObject {
     }
 
     private func setupObservers() {
+        guard let webView else { return }
+
         webView.publisher(for: \.url)
             .sink { [weak self] url in
                 guard let self else { return }
@@ -223,7 +249,7 @@ class BrowserTab: NSObject {
     }
 
     private func fetchFavicon() {
-        guard webView.url?.scheme != ErrorPage.scheme else { return }
+        guard let webView, webView.url?.scheme != ErrorPage.scheme else { return }
         let generation = self.faviconGeneration
         let js = "document.querySelector(\"link[rel~='icon'], link[rel='shortcut icon']\")?.href"
         webView.evaluateJavaScript(js) { [weak self] result, _ in
@@ -250,7 +276,76 @@ class BrowserTab: NSObject {
         }.resume()
     }
 
+    // MARK: - Sleep / Wake
+
+    func sleep() {
+        guard let webView, !isSleeping, !isPlayingAudio else { return }
+
+        // Capture interaction state for later restoration
+        if let state = webView.interactionState {
+            cachedInteractionState = try? NSKeyedArchiver.archivedData(withRootObject: state, requiringSecureCoding: false)
+        }
+
+        // Take a snapshot if we don't have one
+        if latestSnapshot == nil {
+            webView.takeSnapshot(with: nil) { [weak self] image, _ in
+                self?.latestSnapshot = image
+            }
+        }
+
+        // Tear down observers and webView
+        webView.removeObserver(self, forKeyPath: "_isPlayingAudio")
+        faviconCancellables.removeAll()
+        webView.removeFromSuperview()
+        self.webView = nil
+
+        isSleeping = true
+        isLoading = false
+        estimatedProgress = 0
+        canGoBack = false
+        canGoForward = false
+    }
+
+    func wake() {
+        guard webView == nil else { return }
+
+        let config: WKWebViewConfiguration
+        if let spaceID, let space = TabStore.shared.space(withID: spaceID) {
+            config = space.makeWebViewConfiguration()
+        } else {
+            config = WKWebViewConfiguration()
+        }
+        config.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        if config.urlSchemeHandler(forURLScheme: ErrorPage.scheme) == nil {
+            config.setURLSchemeHandler(ErrorSchemeHandler(), forURLScheme: ErrorPage.scheme)
+        }
+
+        let newWebView = BrowserWebView(frame: .zero, configuration: config)
+        newWebView.isInspectable = true
+        self.webView = newWebView
+        applyUserAgent()
+        setupObservers()
+
+        if let cachedInteractionState,
+           let state = try? NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(cachedInteractionState) {
+            newWebView.interactionState = state
+        } else if let url {
+            newWebView.load(URLRequest(url: url))
+        }
+
+        isSleeping = false
+        cachedInteractionState = nil
+    }
+
+    func currentInteractionStateData() -> Data? {
+        if let webView, let state = webView.interactionState {
+            return try? NSKeyedArchiver.archivedData(withRootObject: state, requiringSecureCoding: false)
+        }
+        return cachedInteractionState
+    }
+
     func load(_ url: URL) {
+        if isSleeping { wake() }
         lastAttemptedURL = url
         self.url = url
         navigationPending = true
@@ -272,14 +367,15 @@ class BrowserTab: NSObject {
             }
         }
         updateTitle()
-        webView.load(URLRequest(url: url))
+        webView?.load(URLRequest(url: url))
     }
 
     func reload() {
-        if webView.url?.scheme == ErrorPage.scheme, let lastAttemptedURL {
+        if isSleeping { wake() }
+        if webView?.url?.scheme == ErrorPage.scheme, let lastAttemptedURL {
             load(lastAttemptedURL)
         } else {
-            webView.reload()
+            webView?.reload()
         }
     }
 
@@ -297,17 +393,17 @@ class BrowserTab: NSObject {
         faviconGeneration += 1
         previousHost = nil
 
-        webView.load(URLRequest(url: ErrorPage.url(for: lastAttemptedURL, error: error)))
+        webView?.load(URLRequest(url: ErrorPage.url(for: lastAttemptedURL, error: error)))
     }
 
     private func updateTitle() {
         if navigationPending, let lastAttemptedURL {
             title = strippedScheme(lastAttemptedURL)
-        } else if let webTitle = webView.title, !webTitle.isEmpty {
+        } else if let webTitle = webView?.title, !webTitle.isEmpty {
             title = webTitle
-        } else if let displayURL = webView.url ?? lastAttemptedURL {
+        } else if let displayURL = webView?.url ?? lastAttemptedURL {
             title = strippedScheme(displayURL)
-        } else {
+        } else if !isSleeping {
             title = "New Tab"
         }
     }

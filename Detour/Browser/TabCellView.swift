@@ -31,6 +31,7 @@ class TabCellView: NSTableCellView {
 
     let titleLabel = NSTextField(labelWithString: "")
     let faviconImageView = NSImageView()
+    private let sleepBadge = NSImageView()
     private let closeButton: NSButton
     private let speakerButton: NSButton
     private var trackingArea: NSTrackingArea?
@@ -99,7 +100,14 @@ class TabCellView: NSTableCellView {
         speakerButton.action = #selector(speakerTapped)
         speakerButton.translatesAutoresizingMaskIntoConstraints = false
 
+        sleepBadge.image = NSImage(systemSymbolName: "moon.fill", accessibilityDescription: "Sleeping")
+        sleepBadge.translatesAutoresizingMaskIntoConstraints = false
+        sleepBadge.imageScaling = .scaleProportionallyUpOrDown
+        sleepBadge.contentTintColor = .tertiaryLabelColor
+        sleepBadge.isHidden = true
+
         addSubview(faviconImageView)
+        addSubview(sleepBadge)
         addSubview(speakerButton)
         addSubview(titleLabel)
         addSubview(closeButton)
@@ -113,6 +121,11 @@ class TabCellView: NSTableCellView {
             faviconImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
             faviconImageView.widthAnchor.constraint(equalToConstant: 16),
             faviconImageView.heightAnchor.constraint(equalToConstant: 16),
+
+            sleepBadge.trailingAnchor.constraint(equalTo: faviconImageView.trailingAnchor, constant: 3),
+            sleepBadge.bottomAnchor.constraint(equalTo: faviconImageView.bottomAnchor, constant: 3),
+            sleepBadge.widthAnchor.constraint(equalToConstant: 8),
+            sleepBadge.heightAnchor.constraint(equalToConstant: 8),
 
             speakerButton.leadingAnchor.constraint(equalTo: faviconImageView.trailingAnchor, constant: 4),
             speakerButton.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -228,6 +241,10 @@ class TabCellView: NSTableCellView {
 
     func updateFavicon(_ image: NSImage?) {
         faviconImageView.image = image ?? NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
+    }
+
+    func updateSleeping(_ isSleeping: Bool) {
+        sleepBadge.isHidden = !isSleeping
     }
 
     func updateLoading(_ isLoading: Bool) {

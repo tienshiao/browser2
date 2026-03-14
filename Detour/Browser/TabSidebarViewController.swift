@@ -1070,6 +1070,7 @@ extension TabSidebarViewController: NSTableViewDelegate {
             cell.titleLabel.stringValue = tab.pinnedDisplayTitle
             cell.toolTip = tab.title
             cell.updateFavicon(tab.favicon)
+            cell.updateSleeping(tab.isSleeping)
             cell.updateLoading(tab.isLoading)
             cell.updateProgress(tab.estimatedProgress)
             cell.updateAudio(isPlaying: tab.isPlayingAudio, isMuted: tab.isMuted)
@@ -1103,6 +1104,7 @@ extension TabSidebarViewController: NSTableViewDelegate {
             cell.titleLabel.stringValue = tab.title
             cell.toolTip = tab.title
             cell.updateFavicon(tab.favicon)
+            cell.updateSleeping(tab.isSleeping)
             cell.updateLoading(tab.isLoading)
             cell.updateProgress(tab.estimatedProgress)
             cell.updateAudio(isPlaying: tab.isPlayingAudio, isMuted: tab.isMuted)

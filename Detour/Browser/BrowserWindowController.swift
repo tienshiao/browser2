@@ -497,6 +497,7 @@ class BrowserWindowController: NSWindowController {
 
         guard let tab = selectedTab else { return }
         tab.lastDeselectedAt = nil
+        if tab.isSleeping { tab.wake() }
 
         tab.$url
             .receive(on: RunLoop.main)
@@ -533,7 +534,7 @@ class BrowserWindowController: NSWindowController {
             tabSidebar.selectedTabIndex = index
         }
 
-        if window?.isKeyWindow == true || tab.webView.superview == nil {
+        if window?.isKeyWindow == true || tab.webView?.superview == nil {
             claimWebView(for: tab)
         } else {
             showSnapshot(for: tab)
@@ -541,7 +542,7 @@ class BrowserWindowController: NSWindowController {
     }
 
     private func claimWebView(for tab: BrowserTab) {
-        let webView = tab.webView
+        guard let webView = tab.webView else { return }
 
         if webView.superview?.isDescendant(of: contentContainerView) == true {
             return
@@ -687,12 +688,12 @@ class BrowserWindowController: NSWindowController {
 
     @objc func goBack(_ sender: Any?) {
         ensureOwnsWebView()
-        selectedTab?.webView.goBack()
+        selectedTab?.webView?.goBack()
     }
 
     @objc func goForward(_ sender: Any?) {
         ensureOwnsWebView()
-        selectedTab?.webView.goForward()
+        selectedTab?.webView?.goForward()
     }
 
     @objc func toggleSidebarMode(_ sender: Any?) {
@@ -1130,12 +1131,12 @@ extension BrowserWindowController: TabSidebarDelegate {
 
     func tabSidebarDidRequestGoBack(_ sidebar: TabSidebarViewController) {
         ensureOwnsWebView()
-        selectedTab?.webView.goBack()
+        selectedTab?.webView?.goBack()
     }
 
     func tabSidebarDidRequestGoForward(_ sidebar: TabSidebarViewController) {
         ensureOwnsWebView()
-        selectedTab?.webView.goForward()
+        selectedTab?.webView?.goForward()
     }
 
     func tabSidebarDidRequestReload(_ sidebar: TabSidebarViewController) {
