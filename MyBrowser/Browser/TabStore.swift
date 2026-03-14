@@ -16,6 +16,10 @@ protocol TabStoreObserver: AnyObject {
     func tabStoreDidReorderPinnedTabs(in space: Space)
     func tabStoreDidUpdatePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space)
     func tabStoreDidResetPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space)
+
+    // Pin/unpin atomic notifications
+    func tabStoreDidPinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space)
+    func tabStoreDidUnpinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space)
 }
 
 extension TabStoreObserver {
@@ -29,6 +33,8 @@ extension TabStoreObserver {
     func tabStoreDidReorderPinnedTabs(in space: Space) {}
     func tabStoreDidUpdatePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {}
     func tabStoreDidResetPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {}
+    func tabStoreDidPinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space) {}
+    func tabStoreDidUnpinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space) {}
 }
 
 // MARK: - Space
@@ -481,8 +487,7 @@ class TabStore {
         tab.pinnedTitle = tab.title
         let insertAt = min(destinationIndex ?? space.pinnedTabs.count, space.pinnedTabs.count)
         space.pinnedTabs.insert(tab, at: insertAt)
-        notifyObservers { $0.tabStoreDidRemoveTab(tab, at: index, in: space) }
-        notifyObservers { $0.tabStoreDidInsertPinnedTab(tab, at: insertAt, in: space) }
+        notifyObservers { $0.tabStoreDidPinTab(tab, fromIndex: index, toIndex: insertAt, in: space) }
         scheduleSave()
     }
 
@@ -494,8 +499,7 @@ class TabStore {
         tab.pinnedTitle = nil
         let insertAt = min(destinationIndex ?? 0, space.tabs.count)
         space.tabs.insert(tab, at: insertAt)
-        notifyObservers { $0.tabStoreDidRemovePinnedTab(tab, at: index, in: space) }
-        notifyObservers { $0.tabStoreDidInsertTab(tab, at: insertAt, in: space) }
+        notifyObservers { $0.tabStoreDidUnpinTab(tab, fromIndex: index, toIndex: insertAt, in: space) }
         scheduleSave()
     }
 

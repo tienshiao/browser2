@@ -1244,12 +1244,12 @@ extension BrowserWindowController: TabSidebarDelegate {
 extension BrowserWindowController: TabStoreObserver {
     func tabStoreDidInsertTab(_ tab: BrowserTab, at index: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.setTabs(pinned: space.pinnedTabs, normal: space.tabs)
+        tabSidebar.insertTab(at: index, tabs: space.tabs)
     }
 
     func tabStoreDidRemoveTab(_ tab: BrowserTab, at index: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.setTabs(pinned: space.pinnedTabs, normal: space.tabs)
+        tabSidebar.removeTab(at: index, tabs: space.tabs)
     }
 
     func tabStoreDidReorderTabs(in space: Space) {
@@ -1269,13 +1269,24 @@ extension BrowserWindowController: TabStoreObserver {
 
     func tabStoreDidInsertPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
-        // Both arrays may have changed (tab moved between them), update atomically
-        tabSidebar.setTabs(pinned: space.pinnedTabs, normal: space.tabs)
+        tabSidebar.insertPinnedTab(at: index, pinnedTabs: space.pinnedTabs)
     }
 
     func tabStoreDidRemovePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.setTabs(pinned: space.pinnedTabs, normal: space.tabs)
+        tabSidebar.removePinnedTab(at: index, pinnedTabs: space.pinnedTabs)
+    }
+
+    func tabStoreDidPinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space) {
+        guard space.id == activeSpaceID else { return }
+        tabSidebar.pinTab(fromNormalIndex: fromIndex, toPinnedIndex: toIndex,
+                          tabs: space.tabs, pinnedTabs: space.pinnedTabs)
+    }
+
+    func tabStoreDidUnpinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space) {
+        guard space.id == activeSpaceID else { return }
+        tabSidebar.unpinTab(fromPinnedIndex: fromIndex, toNormalIndex: toIndex,
+                            tabs: space.tabs, pinnedTabs: space.pinnedTabs)
     }
 
     func tabStoreDidReorderPinnedTabs(in space: Space) {

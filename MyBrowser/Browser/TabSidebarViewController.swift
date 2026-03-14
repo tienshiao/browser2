@@ -143,6 +143,72 @@ class TabSidebarViewController: NSViewController {
         tabs = normal  // triggers reload only if not externally suppressed
     }
 
+    // MARK: - Animated Insert/Remove
+
+    func insertTab(at index: Int, tabs newTabs: [BrowserTab]) {
+        // If suppressReload is already set, a drag handler is managing animations
+        if suppressReload { tabs = newTabs; return }
+        suppressReload = true
+        tabs = newTabs
+        suppressReload = false
+        let row = rowForNormalTab(at: index)
+        tableView.insertRows(at: IndexSet(integer: row), withAnimation: .slideDown)
+    }
+
+    func removeTab(at index: Int, tabs newTabs: [BrowserTab]) {
+        if suppressReload { tabs = newTabs; return }
+        let row = rowForNormalTab(at: index)
+        suppressReload = true
+        tabs = newTabs
+        suppressReload = false
+        tableView.removeRows(at: IndexSet(integer: row), withAnimation: .effectFade)
+    }
+
+    func insertPinnedTab(at index: Int, pinnedTabs newPinned: [BrowserTab]) {
+        if suppressReload { pinnedTabs = newPinned; return }
+        suppressReload = true
+        pinnedTabs = newPinned
+        suppressReload = false
+        tableView.insertRows(at: IndexSet(integer: rowForPinnedTab(at: index)), withAnimation: .slideDown)
+    }
+
+    func removePinnedTab(at index: Int, pinnedTabs newPinned: [BrowserTab]) {
+        if suppressReload { pinnedTabs = newPinned; return }
+        let row = rowForPinnedTab(at: index)
+        suppressReload = true
+        pinnedTabs = newPinned
+        suppressReload = false
+        tableView.removeRows(at: IndexSet(integer: row), withAnimation: .effectFade)
+    }
+
+    // MARK: - Animated Pin/Unpin
+
+    func pinTab(fromNormalIndex srcIdx: Int, toPinnedIndex dstIdx: Int,
+                tabs newTabs: [BrowserTab], pinnedTabs newPinned: [BrowserTab]) {
+        if suppressReload { tabs = newTabs; pinnedTabs = newPinned; return }
+        let oldRow = rowForNormalTab(at: srcIdx)
+        suppressReload = true
+        tabs = newTabs
+        pinnedTabs = newPinned
+        suppressReload = false
+        tableView.beginUpdates()
+        tableView.moveRow(at: oldRow, to: rowForPinnedTab(at: dstIdx))
+        tableView.endUpdates()
+    }
+
+    func unpinTab(fromPinnedIndex srcIdx: Int, toNormalIndex dstIdx: Int,
+                  tabs newTabs: [BrowserTab], pinnedTabs newPinned: [BrowserTab]) {
+        if suppressReload { tabs = newTabs; pinnedTabs = newPinned; return }
+        let oldRow = rowForPinnedTab(at: srcIdx)
+        suppressReload = true
+        tabs = newTabs
+        pinnedTabs = newPinned
+        suppressReload = false
+        tableView.beginUpdates()
+        tableView.moveRow(at: oldRow, to: rowForNormalTab(at: dstIdx))
+        tableView.endUpdates()
+    }
+
     // MARK: - Row Layout
 
     enum SidebarRow {
@@ -154,35 +220,27 @@ class TabSidebarViewController: NSViewController {
 
     func sidebarRow(for row: Int, pinnedCount: Int? = nil) -> SidebarRow {
         let pc = pinnedCount ?? pinnedTabs.count
-        if pc > 0 {
-            if row < pc {
-                return .pinnedTab(index: row)
-            }
-            if row == pc {
-                return .separator
-            }
-            let afterSeparator = row - pc - 1
-            if afterSeparator == 0 {
-                return .newTab
-            }
-            return .normalTab(index: afterSeparator - 1)
-        } else {
-            if row == 0 { return .newTab }
-            return .normalTab(index: row - 1)
+        if row < pc {
+            return .pinnedTab(index: row)
         }
+        if row == pc {
+            return .separator
+        }
+        let afterSeparator = row - pc - 1
+        if afterSeparator == 0 {
+            return .newTab
+        }
+        return .normalTab(index: afterSeparator - 1)
     }
 
     private func totalRowCount(forTableView tv: NSTableView) -> Int {
         let (p, t) = tabsAndPinnedForTableView(tv)
         let pinnedCount = p.count
-        let separatorCount = pinnedCount > 0 ? 1 : 0
-        return pinnedCount + separatorCount + 1 + t.count
+        return pinnedCount + 1 + 1 + t.count
     }
 
     func rowForNormalTab(at tabIndex: Int) -> Int {
-        let pinnedCount = pinnedTabs.count
-        let separatorCount = pinnedCount > 0 ? 1 : 0
-        return pinnedCount + separatorCount + 1 + tabIndex
+        return pinnedTabs.count + 1 + 1 + tabIndex
     }
 
     func rowForPinnedTab(at index: Int) -> Int {
@@ -902,32 +960,23 @@ extension TabSidebarViewController: NSTableViewDataSource {
 
         case (.normalTab(let srcIdx), .pinnedTab(let dstIdx)):
             let oldSourceRow = rowForNormalTab(at: srcIdx)
-            let hadSeparator = !pinnedTabs.isEmpty
 
             // Update data model (reload stays suppressed via setTabs)
             delegate?.tabSidebar(self, didDragTabToPinAt: srcIdx, destinationIndex: dstIdx)
 
             tableView.beginUpdates()
-            if !hadSeparator {
-                tableView.insertRows(at: IndexSet(integer: pinnedTabs.count), withAnimation: .effectFade)
-            }
             tableView.moveRow(at: oldSourceRow, to: rowForPinnedTab(at: dstIdx))
             tableView.endUpdates()
             return true
 
         case (.pinnedTab(let srcIdx), .normalTab(let dstIdx)):
             let oldSourceRow = rowForPinnedTab(at: srcIdx)
-            let willRemoveSeparator = pinnedTabs.count == 1
-            let oldSeparatorRow = pinnedTabs.count
 
             // Update data model (reload stays suppressed via setTabs)
             delegate?.tabSidebar(self, didDragPinnedTabToUnpinAt: srcIdx, destinationIndex: dstIdx)
 
             tableView.beginUpdates()
             tableView.moveRow(at: oldSourceRow, to: rowForNormalTab(at: dstIdx))
-            if willRemoveSeparator {
-                tableView.removeRows(at: IndexSet(integer: oldSeparatorRow), withAnimation: .effectFade)
-            }
             tableView.endUpdates()
             return true
 
@@ -985,7 +1034,9 @@ extension TabSidebarViewController: NSTableViewDelegate {
             if isActive {
                 cell.onClose = { [weak self] in
                     guard let self else { return }
-                    self.delegate?.tabSidebar(self, didRequestClosePinnedTabAt: index)
+                    let row = self.tableView.row(for: cell)
+                    guard row >= 0, case .pinnedTab(let idx) = self.sidebarRow(for: row) else { return }
+                    self.delegate?.tabSidebar(self, didRequestClosePinnedTabAt: idx)
                 }
                 cell.onToggleMute = { tab.toggleMute() }
             } else {
@@ -1016,7 +1067,9 @@ extension TabSidebarViewController: NSTableViewDelegate {
             if isActive {
                 cell.onClose = { [weak self] in
                     guard let self else { return }
-                    self.delegate?.tabSidebar(self, didRequestCloseTabAt: tabIndex)
+                    let row = self.tableView.row(for: cell)
+                    guard row >= 0, case .normalTab(let idx) = self.sidebarRow(for: row) else { return }
+                    self.delegate?.tabSidebar(self, didRequestCloseTabAt: idx)
                 }
                 cell.onToggleMute = { tab.toggleMute() }
             } else {
