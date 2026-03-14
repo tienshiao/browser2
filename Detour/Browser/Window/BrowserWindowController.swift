@@ -983,7 +983,7 @@ class BrowserWindowController: NSWindowController {
         }
 
         // Create tab with the existing webview
-        let tab = store.addTab(in: space, webView: webView, afterTabID: selectedTabID)
+        let tab = store.addTab(in: space, webView: webView, parentID: selectedTabID)
 
         // Clear peek references so selectTab won't double-dismiss
         peekOverlayView = nil
@@ -1351,7 +1351,7 @@ extension BrowserWindowController: CommandPaletteDelegate {
             navigateToAddress(input)
         } else {
             guard let space = activeSpace else { return }
-            let tab = store.addTab(in: space, afterTabID: selectedTabID)
+            let tab = store.addTab(in: space, parentID: selectedTabID)
             selectTab(id: tab.id)
             if let url = urlFromInput(input) {
                 tab.load(url)
@@ -1403,7 +1403,7 @@ extension BrowserWindowController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
         if navigationAction.navigationType == .linkActivated && navigationAction.modifierFlags.contains(.command) {
             if let url = navigationAction.request.url, let space = activeSpace {
-                _ = store.addTab(in: space, url: url, afterTabID: selectedTabID)
+                _ = store.addTab(in: space, url: url, parentID: selectedTabID)
             }
             return .cancel
         }

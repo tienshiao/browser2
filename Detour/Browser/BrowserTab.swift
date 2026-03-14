@@ -19,6 +19,7 @@ class BrowserTab: NSObject {
     @Published var favicon: NSImage?
     private(set) var faviconURL: URL?
     var spaceID: UUID?
+    var parentID: UUID?
     private var cachedInteractionState: Data?
 
     // MARK: - Archiving

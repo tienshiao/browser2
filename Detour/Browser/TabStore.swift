@@ -179,7 +179,8 @@ class TabStore {
                     faviconURL: tab.faviconURL?.absoluteString,
                     interactionState: stateData,
                     sortOrder: tabIndex,
-                    lastDeselectedAt: tab.lastDeselectedAt?.timeIntervalSince1970
+                    lastDeselectedAt: tab.lastDeselectedAt?.timeIntervalSince1970,
+                    parentID: tab.parentID?.uuidString
                 ))
             }
             sessionData.append((spaceRecord, tabRecords))
@@ -253,6 +254,7 @@ class TabStore {
                     tab.lastDeselectedAt = tabRecord.lastDeselectedAt.map { Date(timeIntervalSince1970: $0) } ?? Date()
                 }
                 tab.spaceID = spaceID
+                tab.parentID = tabRecord.parentID.flatMap { UUID(uuidString: $0) }
                 space.tabs.append(tab)
                 self.subscribeToTab(tab, spaceID: spaceID)
             }
@@ -419,16 +421,36 @@ class TabStore {
 
     // MARK: - Tab Mutations
 
-    private func insertTab(_ tab: BrowserTab, in space: Space, afterTabID: UUID?) -> Int {
+    private func insertTab(_ tab: BrowserTab, in space: Space, parentID: UUID?) -> Int {
         tab.spaceID = space.id
+        tab.parentID = parentID
         let insertionIndex: Int
-        if let afterTabID, let afterIndex = space.tabs.firstIndex(where: { $0.id == afterTabID }) {
-            insertionIndex = afterIndex + 1
-            space.tabs.insert(tab, at: insertionIndex)
+
+        if let parentID {
+            let parentIsNormalTab = space.tabs.contains { $0.id == parentID }
+            if parentIsNormalTab, let parentIndex = space.tabs.firstIndex(where: { $0.id == parentID }) {
+                // Insert after parent + all existing children of this parent after the parent
+                var lastSiblingIndex = parentIndex
+                for i in (parentIndex + 1)..<space.tabs.count {
+                    if space.tabs[i].parentID == parentID { lastSiblingIndex = i }
+                    else { break }
+                }
+                insertionIndex = lastSiblingIndex + 1
+            } else {
+                // Pinned parent (or parent not found) → first normal tab, after existing siblings
+                var lastSiblingIndex = -1
+                for i in 0..<space.tabs.count {
+                    if space.tabs[i].parentID == parentID { lastSiblingIndex = i }
+                    else if lastSiblingIndex >= 0 { break }
+                }
+                insertionIndex = lastSiblingIndex + 1
+            }
         } else {
-            space.tabs.append(tab)
-            insertionIndex = space.tabs.count - 1
+            // No parent → first normal tab
+            insertionIndex = 0
         }
+
+        space.tabs.insert(tab, at: insertionIndex)
         subscribeToTab(tab, spaceID: space.id)
         notifyObservers { $0.tabStoreDidInsertTab(tab, at: insertionIndex, in: space) }
         scheduleSave()
@@ -436,17 +458,17 @@ class TabStore {
     }
 
     @discardableResult
-    func addTab(in space: Space, url: URL? = nil, afterTabID: UUID? = nil) -> BrowserTab {
+    func addTab(in space: Space, url: URL? = nil, parentID: UUID? = nil) -> BrowserTab {
         let tab = BrowserTab(configuration: space.makeWebViewConfiguration())
-        insertTab(tab, in: space, afterTabID: afterTabID)
+        insertTab(tab, in: space, parentID: parentID)
         if let url { tab.load(url) }
         return tab
     }
 
     @discardableResult
-    func addTab(in space: Space, webView: WKWebView, afterTabID: UUID? = nil) -> BrowserTab {
+    func addTab(in space: Space, webView: WKWebView, parentID: UUID? = nil) -> BrowserTab {
         let tab = BrowserTab(webView: webView)
-        insertTab(tab, in: space, afterTabID: afterTabID)
+        insertTab(tab, in: space, parentID: parentID)
         return tab
     }
 

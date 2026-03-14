@@ -263,6 +263,12 @@ struct AppDatabase {
             }
         }
 
+        migrator.registerMigration("v6") { db in
+            try db.alter(table: "tab") { t in
+                t.add(column: "parentID", .text)
+            }
+        }
+
         return migrator
     }
 }

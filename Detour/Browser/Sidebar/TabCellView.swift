@@ -145,6 +145,14 @@ class TabCellView: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        isHovered = false
+        closeButton.isHidden = true
+        hoverBackground.isHidden = true
+        updateLayoutState()
+    }
+
     override func layout() {
         super.layout()
         hoverBackground.frame = bounds.insetBy(dx: -6, dy: 1)

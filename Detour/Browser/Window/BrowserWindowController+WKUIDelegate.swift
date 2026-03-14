@@ -11,14 +11,14 @@ extension BrowserWindowController: WKUIDelegate {
         switch contextMenuLinkAction {
         case .openInNewTab:
             contextMenuLinkAction = .none
-            _ = TabStore.shared.addTab(in: space, url: url, afterTabID: selectedTabID)
+            _ = TabStore.shared.addTab(in: space, url: url, parentID: selectedTabID)
         case .openInNewWindow:
             contextMenuLinkAction = .none
             if let appDelegate = NSApp.delegate as? AppDelegate {
                 appDelegate.createNewWindowWithURL(url)
             }
         case .none:
-            let tab = TabStore.shared.addTab(in: space, url: url, afterTabID: selectedTabID)
+            let tab = TabStore.shared.addTab(in: space, url: url, parentID: selectedTabID)
             selectTab(id: tab.id)
         }
 
