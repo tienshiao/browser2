@@ -775,7 +775,7 @@ class BrowserWindowController: NSWindowController {
         tabSidebar.fauxAddressBar.isSecure = true
         tabSidebar.backButton.isEnabled = false
         tabSidebar.forwardButton.isEnabled = false
-        window?.title = "MyBrowser"
+        window?.title = "Detour"
     }
 
     @objc func closeCurrentTab(_ sender: Any?) {

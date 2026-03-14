@@ -1,4 +1,4 @@
-name: MyBrowser
+name: Detour
 options:
   deploymentTarget:
     macOS: "14.0"
@@ -7,31 +7,31 @@ packages:
     url: https://github.com/groue/GRDB.swift
     from: "7.0.0"
 targets:
-  MyBrowser:
+  Detour:
     type: application
     platform: macOS
     sources:
-      - MyBrowser
+      - Detour
     dependencies:
       - package: GRDB
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.mybrowser.app
-        INFOPLIST_FILE: MyBrowser/Resources/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.detour.app
+        INFOPLIST_FILE: Detour/Resources/Info.plist
         SWIFT_VERSION: "5.10"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
-  MyBrowserTests:
+  DetourTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - MyBrowserTests
+      - DetourTests
     dependencies:
-      - target: MyBrowser
+      - target: Detour
       - package: GRDB
     settings:
       base:
         SWIFT_VERSION: "5.10"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: YES
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/MyBrowser.app/Contents/MacOS/MyBrowser"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Detour.app/Contents/MacOS/Detour"
         BUNDLE_LOADER: "$(TEST_HOST)"

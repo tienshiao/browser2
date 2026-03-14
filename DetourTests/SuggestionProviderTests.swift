@@ -1,6 +1,6 @@
 import XCTest
 import GRDB
-@testable import MyBrowser
+@testable import Detour
 
 final class SuggestionProviderTests: XCTestCase {
 

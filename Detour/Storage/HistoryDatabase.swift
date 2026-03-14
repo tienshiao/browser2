@@ -8,7 +8,7 @@ struct HistoryDatabase {
 
     private init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("MyBrowser", isDirectory: true)
+        let dir = appSupport.appendingPathComponent("Detour", isDirectory: true)
         try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dbPath = dir.appendingPathComponent("history.db").path
 

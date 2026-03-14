@@ -9,13 +9,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 xcodegen generate
 
 # Build
-xcodebuild -scheme MyBrowser -configuration Debug build
+xcodebuild -scheme Detour -configuration Debug build
 
 # Run tests
-xcodebuild -scheme MyBrowserTests -configuration Debug test
+xcodebuild -scheme DetourTests -configuration Debug test
 
 # Run a single test
-xcodebuild -scheme MyBrowserTests -configuration Debug test -only-testing:MyBrowserTests/SuggestionProviderTests/testExample
+xcodebuild -scheme DetourTests -configuration Debug test -only-testing:DetourTests/SuggestionProviderTests/testExample
 ```
 
 ## Architecture

@@ -1,4 +1,4 @@
-# MyBrowser
+# Detour
 
 A native macOS web browser built with Swift and WebKit.
 
@@ -26,13 +26,13 @@ A native macOS web browser built with Swift and WebKit.
 xcodegen generate
 
 # Build
-xcodebuild -scheme MyBrowser -configuration Debug build
+xcodebuild -scheme Detour -configuration Debug build
 
 # Run tests
-xcodebuild -scheme MyBrowserTests -configuration Debug test
+xcodebuild -scheme DetourTests -configuration Debug test
 ```
 
-Or open `MyBrowser.xcodeproj` in Xcode after running `xcodegen generate`.
+Or open `Detour.xcodeproj` in Xcode after running `xcodegen generate`.
 
 ## Dependencies
 
