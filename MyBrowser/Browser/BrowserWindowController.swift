@@ -39,6 +39,11 @@ class BrowserWindowController: NSWindowController {
     private(set) var isIncognito = false
     private var incognitoSpaceID: UUID?
 
+    enum ContextMenuLinkAction {
+        case none, openInNewTab, openInNewWindow
+    }
+    var contextMenuLinkAction: ContextMenuLinkAction = .none
+
     private var peekOverlayView: PeekOverlayView?
     private var peekWebView: WKWebView?
     private var peekWebViewTopConstraint: NSLayoutConstraint?
@@ -1336,8 +1341,7 @@ extension BrowserWindowController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
         if navigationAction.navigationType == .linkActivated && navigationAction.modifierFlags.contains(.command) {
             if let url = navigationAction.request.url, let space = activeSpace {
-                let tab = store.addTab(in: space, url: url, afterTabID: selectedTabID)
-                selectTab(id: tab.id)
+                _ = store.addTab(in: space, url: url, afterTabID: selectedTabID)
             }
             return .cancel
         }

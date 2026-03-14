@@ -62,7 +62,7 @@ class BrowserTab: NSObject {
         if configuration.urlSchemeHandler(forURLScheme: ErrorPage.scheme) == nil {
             configuration.setURLSchemeHandler(ErrorSchemeHandler(), forURLScheme: ErrorPage.scheme)
         }
-        self.webView = WKWebView(frame: .zero, configuration: configuration)
+        self.webView = BrowserWebView(frame: .zero, configuration: configuration)
         super.init()
         self.webView.isInspectable = true
         setupObservers()

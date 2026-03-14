@@ -3,13 +3,25 @@ import WebKit
 
 extension BrowserWindowController: WKUIDelegate {
 
-    // MARK: - window.open()
+    // MARK: - window.open() and context menu link actions
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url, let space = activeSpace {
+        guard let url = navigationAction.request.url, let space = activeSpace else { return nil }
+
+        switch contextMenuLinkAction {
+        case .openInNewTab:
+            contextMenuLinkAction = .none
+            _ = TabStore.shared.addTab(in: space, url: url, afterTabID: selectedTabID)
+        case .openInNewWindow:
+            contextMenuLinkAction = .none
+            if let appDelegate = NSApp.delegate as? AppDelegate {
+                appDelegate.createNewWindowWithURL(url)
+            }
+        case .none:
             let tab = TabStore.shared.addTab(in: space, url: url, afterTabID: selectedTabID)
             selectTab(id: tab.id)
         }
+
         return nil
     }
 

@@ -75,6 +75,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         observeWindowClose(wc)
     }
 
+    func createNewWindowWithURL(_ url: URL) {
+        let wc = BrowserWindowController(incognito: false)
+        windowControllers.append(wc)
+
+        // Set up space and tab before showing the window to avoid snapshot flicker
+        if let currentWC = NSApp.keyWindow?.windowController as? BrowserWindowController,
+           !currentWC.isIncognito,
+           let spaceID = currentWC.activeSpaceID,
+           let space = TabStore.shared.space(withID: spaceID) {
+            wc.setActiveSpace(id: spaceID)
+            let tab = TabStore.shared.addTab(in: space, url: url)
+            wc.selectTab(id: tab.id)
+        } else if let space = TabStore.shared.spaces.first(where: { !$0.isIncognito }) {
+            wc.setActiveSpace(id: space.id)
+            let tab = TabStore.shared.addTab(in: space, url: url)
+            wc.selectTab(id: tab.id)
+        }
+
+        wc.showWindow(nil)
+        observeWindowClose(wc)
+    }
+
     @objc func createNewIncognitoWindow() {
         let wc = BrowserWindowController(incognito: true)
         windowControllers.append(wc)
