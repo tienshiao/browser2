@@ -1358,6 +1358,15 @@ extension BrowserWindowController: WKNavigationDelegate {
             return .cancel
         }
 
+        // Open non-HTTP(S) URLs (App Store, mailto, etc.) externally
+        if let url = navigationAction.request.url,
+           let scheme = url.scheme,
+           scheme != "http", scheme != "https",
+           scheme != "about", scheme != ErrorPage.scheme {
+            NSWorkspace.shared.open(url)
+            return .cancel
+        }
+
         if navigationAction.shouldPerformDownload {
             return .download
         }
