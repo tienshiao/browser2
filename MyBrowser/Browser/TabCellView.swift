@@ -397,8 +397,17 @@ class SeparatorCellView: NSTableCellView {
 }
 
 class NewTabCellView: NSTableCellView {
+    private let hoverBackground = NSView()
+    private var trackingArea: NSTrackingArea?
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        wantsLayer = true
+
+        hoverBackground.wantsLayer = true
+        hoverBackground.layer?.cornerRadius = 6
+        hoverBackground.isHidden = true
+        addSubview(hoverBackground, positioned: .below, relativeTo: nil)
 
         let plusIcon = NSImageView(image: NSImage(systemSymbolName: "plus", accessibilityDescription: "New Tab")!)
         plusIcon.translatesAutoresizingMaskIntoConstraints = false
@@ -420,6 +429,35 @@ class NewTabCellView: NSTableCellView {
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -4),
         ])
+    }
+
+    override func layout() {
+        super.layout()
+        hoverBackground.frame = bounds.insetBy(dx: -6, dy: 1)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hoverBackground.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+        hoverBackground.isHidden = false
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoverBackground.isHidden = true
     }
 
     required init?(coder: NSCoder) { fatalError() }
