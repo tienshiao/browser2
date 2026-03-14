@@ -112,6 +112,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         observeWindowClose(wc)
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard url.scheme == "http" || url.scheme == "https" else { continue }
+            if let wc = NSApp.keyWindow?.windowController as? BrowserWindowController,
+               let space = wc.activeSpace {
+                let tab = TabStore.shared.addTab(in: space, url: url)
+                wc.selectTab(id: tab.id)
+            } else {
+                createNewWindowWithURL(url)
+            }
+        }
+    }
+
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let menu = NSMenu()
         menu.addItem(withTitle: "New Window", action: #selector(createNewWindow), keyEquivalent: "")
