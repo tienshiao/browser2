@@ -134,7 +134,7 @@ class TabStore {
     /// In-memory dedup cache for history: "url|spaceID" -> timestamp
     private var recentHistoryWrites: [String: TimeInterval] = [:]
 
-    private init() {}
+    init() {}
 
     func space(withID id: UUID) -> Space? {
         spaces.first { $0.id == id }
@@ -424,31 +424,14 @@ class TabStore {
     private func insertTab(_ tab: BrowserTab, in space: Space, parentID: UUID?) -> Int {
         tab.spaceID = space.id
         tab.parentID = parentID
-        let insertionIndex: Int
 
-        if let parentID {
-            let parentIsNormalTab = space.tabs.contains { $0.id == parentID }
-            if parentIsNormalTab, let parentIndex = space.tabs.firstIndex(where: { $0.id == parentID }) {
-                // Insert after parent + all existing children of this parent after the parent
-                var lastSiblingIndex = parentIndex
-                for i in (parentIndex + 1)..<space.tabs.count {
-                    if space.tabs[i].parentID == parentID { lastSiblingIndex = i }
-                    else { break }
-                }
-                insertionIndex = lastSiblingIndex + 1
-            } else {
-                // Pinned parent (or parent not found) → first normal tab, after existing siblings
-                var lastSiblingIndex = -1
-                for i in 0..<space.tabs.count {
-                    if space.tabs[i].parentID == parentID { lastSiblingIndex = i }
-                    else if lastSiblingIndex >= 0 { break }
-                }
-                insertionIndex = lastSiblingIndex + 1
-            }
-        } else {
-            // No parent → first normal tab
-            insertionIndex = 0
-        }
+        let existingTabs = space.tabs.map { (id: $0.id, parentID: $0.parentID) }
+        let pinnedTabIDs = Set(space.pinnedTabs.map(\.id))
+        let insertionIndex = tabInsertionIndex(
+            parentID: parentID,
+            existingTabs: existingTabs,
+            pinnedTabIDs: pinnedTabIDs
+        )
 
         space.tabs.insert(tab, at: insertionIndex)
         subscribeToTab(tab, spaceID: space.id)

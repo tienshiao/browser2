@@ -211,43 +211,22 @@ class TabSidebarViewController: NSViewController {
 
     // MARK: - Row Layout
 
-    enum SidebarRow {
-        case topSpacer
-        case pinnedTab(index: Int)
-        case separator
-        case newTab
-        case normalTab(index: Int)
-    }
-
     func sidebarRow(for row: Int, pinnedCount: Int? = nil) -> SidebarRow {
-        if row == 0 { return .topSpacer }
-        let adjusted = row - 1
         let pc = pinnedCount ?? pinnedTabs.count
-        if adjusted < pc {
-            return .pinnedTab(index: adjusted)
-        }
-        if adjusted == pc {
-            return .separator
-        }
-        let afterSeparator = adjusted - pc - 1
-        if afterSeparator == 0 {
-            return .newTab
-        }
-        return .normalTab(index: afterSeparator - 1)
+        return Detour.sidebarRow(for: row, pinnedCount: pc)
     }
 
     private func totalRowCount(forTableView tv: NSTableView) -> Int {
         let (p, t) = tabsAndPinnedForTableView(tv)
-        let pinnedCount = p.count
-        return 1 + pinnedCount + 1 + 1 + t.count
+        return totalSidebarRowCount(pinnedCount: p.count, tabCount: t.count)
     }
 
     func rowForNormalTab(at tabIndex: Int) -> Int {
-        return 1 + pinnedTabs.count + 1 + 1 + tabIndex
+        return Detour.rowForNormalTab(at: tabIndex, pinnedCount: pinnedTabs.count)
     }
 
     func rowForPinnedTab(at index: Int) -> Int {
-        return 1 + index
+        return Detour.rowForPinnedTab(at: index)
     }
 
     var tintColor: NSColor? {
