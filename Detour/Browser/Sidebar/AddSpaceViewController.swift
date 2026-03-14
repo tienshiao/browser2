@@ -6,19 +6,19 @@ class AddSpaceViewController: NSViewController {
     private var selectedColorHex = Space.presetColors[0]
     private var colorButtons: [NSButton] = []
     private var actionButton: NSButton!
+    private var nameField: NSTextField!
+    private var emojiField: NSTextField!
 
     override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 160))
 
-        let nameField = NSTextField()
+        nameField = NSTextField()
         nameField.placeholderString = "Space name"
         nameField.translatesAutoresizingMaskIntoConstraints = false
-        nameField.tag = 1
 
-        let emojiField = NSTextField()
+        emojiField = NSTextField()
         emojiField.placeholderString = "Emoji"
         emojiField.translatesAutoresizingMaskIntoConstraints = false
-        emojiField.tag = 2
 
         let colorStack = NSStackView()
         colorStack.orientation = .horizontal
@@ -97,8 +97,8 @@ class AddSpaceViewController: NSViewController {
     }
 
     @objc private func createClicked() {
-        let name = (view.viewWithTag(1) as? NSTextField)?.stringValue ?? ""
-        let emoji = (view.viewWithTag(2) as? NSTextField)?.stringValue ?? ""
+        let name = nameField.stringValue
+        let emoji = emojiField.stringValue
         let finalName = name.isEmpty ? "Space" : name
         let finalEmoji = emoji.isEmpty ? "⭐️" : String(emoji.prefix(1))
         onCreate?(finalName, finalEmoji, selectedColorHex)

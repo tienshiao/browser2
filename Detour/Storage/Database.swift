@@ -21,29 +21,52 @@ struct AppDatabase {
         try migrator.migrate(dbQueue)
     }
 
-    func saveSession(spaces: [(SpaceRecord, [TabRecord])], lastActiveSpaceID: String?) {
+    // MARK: - Helpers
+
+    private func performWrite(_ label: String, _ work: (GRDB.Database) throws -> Void) {
         do {
-            try dbQueue.write { db in
-                try db.execute(sql: "PRAGMA foreign_keys = ON")
-                // Clear existing session data (tabs cascade-deleted via FK)
-                try SpaceRecord.deleteAll(db)
+            try dbQueue.write(work)
+        } catch {
+            print("Failed to \(label): \(error)")
+        }
+    }
 
-                for (spaceRecord, tabRecords) in spaces {
-                    try spaceRecord.insert(db)
-                    for tabRecord in tabRecords {
-                        try tabRecord.insert(db)
-                    }
-                }
+    private func performWrite<T>(_ label: String, default defaultValue: T, _ work: (GRDB.Database) throws -> T) -> T {
+        do {
+            return try dbQueue.write(work)
+        } catch {
+            print("Failed to \(label): \(error)")
+            return defaultValue
+        }
+    }
 
-                if let activeID = lastActiveSpaceID {
-                    try db.execute(
-                        sql: "INSERT INTO appState (key, value) VALUES ('lastActiveSpaceID', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                        arguments: [activeID]
-                    )
+    private func performRead<T>(_ label: String, default defaultValue: T, _ work: (GRDB.Database) throws -> T) -> T {
+        do {
+            return try dbQueue.read(work)
+        } catch {
+            print("Failed to \(label): \(error)")
+            return defaultValue
+        }
+    }
+
+    func saveSession(spaces: [(SpaceRecord, [TabRecord])], lastActiveSpaceID: String?) {
+        performWrite("save session") { db in
+            try db.execute(sql: "PRAGMA foreign_keys = ON")
+            try SpaceRecord.deleteAll(db)
+
+            for (spaceRecord, tabRecords) in spaces {
+                try spaceRecord.insert(db)
+                for tabRecord in tabRecords {
+                    try tabRecord.insert(db)
                 }
             }
-        } catch {
-            print("Failed to save session: \(error)")
+
+            if let activeID = lastActiveSpaceID {
+                try db.execute(
+                    sql: "INSERT INTO appState (key, value) VALUES ('lastActiveSpaceID', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    arguments: [activeID]
+                )
+            }
         }
     }
 
@@ -52,159 +75,109 @@ struct AppDatabase {
     private static let closedTabCap = 100
 
     func pushClosedTab(_ record: ClosedTabRecord) {
-        do {
-            try dbQueue.write { db in
-                var r = record
-                try r.insert(db)
-                // Trim oldest entries beyond cap
-                let count = try ClosedTabRecord.fetchCount(db)
-                if count > Self.closedTabCap {
-                    let excess = count - Self.closedTabCap
-                    try db.execute(
-                        sql: "DELETE FROM closedTab WHERE id IN (SELECT id FROM closedTab ORDER BY id ASC LIMIT ?)",
-                        arguments: [excess]
-                    )
-                }
+        performWrite("push closed tab") { db in
+            var r = record
+            try r.insert(db)
+            let count = try ClosedTabRecord.fetchCount(db)
+            if count > Self.closedTabCap {
+                let excess = count - Self.closedTabCap
+                try db.execute(
+                    sql: "DELETE FROM closedTab WHERE id IN (SELECT id FROM closedTab ORDER BY id ASC LIMIT ?)",
+                    arguments: [excess]
+                )
             }
-        } catch {
-            print("Failed to push closed tab: \(error)")
         }
     }
 
     func popClosedTab(spaceID: String) -> ClosedTabRecord? {
-        do {
-            return try dbQueue.write { db in
-                guard let record = try ClosedTabRecord
-                    .filter(Column("spaceID") == spaceID)
-                    .order(Column("id").desc)
-                    .fetchOne(db) else { return nil }
-                try record.delete(db)
-                return record
-            }
-        } catch {
-            print("Failed to pop closed tab: \(error)")
-            return nil
+        performWrite("pop closed tab", default: nil) { db in
+            guard let record = try ClosedTabRecord
+                .filter(Column("spaceID") == spaceID)
+                .order(Column("id").desc)
+                .fetchOne(db) else { return nil }
+            try record.delete(db)
+            return record
         }
     }
 
     func loadClosedTabs() -> [ClosedTabRecord] {
-        do {
-            return try dbQueue.read { db in
-                try ClosedTabRecord.order(Column("id").desc).fetchAll(db)
-            }
-        } catch {
-            print("Failed to load closed tabs: \(error)")
-            return []
+        performRead("load closed tabs", default: []) { db in
+            try ClosedTabRecord.order(Column("id").desc).fetchAll(db)
         }
     }
 
     func deleteClosedTabs(spaceID: String) {
-        do {
-            try dbQueue.write { db in
-                try ClosedTabRecord
-                    .filter(Column("spaceID") == spaceID)
-                    .deleteAll(db)
-            }
-        } catch {
-            print("Failed to delete closed tabs for space: \(error)")
+        performWrite("delete closed tabs for space") { db in
+            try ClosedTabRecord
+                .filter(Column("spaceID") == spaceID)
+                .deleteAll(db)
         }
     }
 
     // MARK: - Downloads
 
     func saveDownload(_ record: DownloadRecord) {
-        do {
-            try dbQueue.write { db in
-                try record.save(db)
-            }
-        } catch {
-            print("Failed to save download: \(error)")
+        performWrite("save download") { db in
+            try record.save(db)
         }
     }
 
     func loadDownloads() -> [DownloadRecord] {
-        do {
-            return try dbQueue.read { db in
-                try DownloadRecord.order(Column("createdAt").desc).fetchAll(db)
-            }
-        } catch {
-            print("Failed to load downloads: \(error)")
-            return []
+        performRead("load downloads", default: []) { db in
+            try DownloadRecord.order(Column("createdAt").desc).fetchAll(db)
         }
     }
 
     func deleteDownload(id: String) {
-        do {
-            try dbQueue.write { db in
-                try DownloadRecord.filter(Column("id") == id).deleteAll(db)
-            }
-        } catch {
-            print("Failed to delete download: \(error)")
+        performWrite("delete download") { db in
+            try DownloadRecord.filter(Column("id") == id).deleteAll(db)
         }
     }
 
     func deleteCompletedDownloads() {
-        do {
-            try dbQueue.write { db in
-                try DownloadRecord.filter(Column("state") == "completed").deleteAll(db)
-            }
-        } catch {
-            print("Failed to delete completed downloads: \(error)")
+        performWrite("delete completed downloads") { db in
+            try DownloadRecord.filter(Column("state") == "completed").deleteAll(db)
         }
     }
 
     // MARK: - Pinned Tabs
 
     func savePinnedTabs(_ records: [PinnedTabRecord], spaceID: String) {
-        do {
-            try dbQueue.write { db in
-                try PinnedTabRecord
-                    .filter(Column("spaceID") == spaceID)
-                    .deleteAll(db)
-                for record in records {
-                    try record.insert(db)
-                }
+        performWrite("save pinned tabs") { db in
+            try PinnedTabRecord
+                .filter(Column("spaceID") == spaceID)
+                .deleteAll(db)
+            for record in records {
+                try record.insert(db)
             }
-        } catch {
-            print("Failed to save pinned tabs: \(error)")
         }
     }
 
     func loadPinnedTabs(spaceID: String) -> [PinnedTabRecord] {
-        do {
-            return try dbQueue.read { db in
-                try PinnedTabRecord
-                    .filter(Column("spaceID") == spaceID)
-                    .order(Column("sortOrder"))
-                    .fetchAll(db)
-            }
-        } catch {
-            print("Failed to load pinned tabs: \(error)")
-            return []
+        performRead("load pinned tabs", default: []) { db in
+            try PinnedTabRecord
+                .filter(Column("spaceID") == spaceID)
+                .order(Column("sortOrder"))
+                .fetchAll(db)
         }
     }
 
     func loadSession() -> (spaces: [(SpaceRecord, [TabRecord])], lastActiveSpaceID: String?)? {
-        do {
-            return try dbQueue.read { db in
-                let spaceRecords = try SpaceRecord.order(Column("sortOrder")).fetchAll(db)
-                guard !spaceRecords.isEmpty else { return nil }
+        performRead("load session", default: nil) { db in
+            let spaceRecords = try SpaceRecord.order(Column("sortOrder")).fetchAll(db)
+            guard !spaceRecords.isEmpty else { return nil }
 
-                var spaces: [(SpaceRecord, [TabRecord])] = []
-                for spaceRecord in spaceRecords {
-                    let tabRecords = try TabRecord
-                        .filter(Column("spaceID") == spaceRecord.id)
-                        .order(Column("sortOrder"))
-                        .fetchAll(db)
-                    spaces.append((spaceRecord, tabRecords))
-                }
-
-                let lastActiveSpaceID = try String.fetchOne(db, sql: "SELECT value FROM appState WHERE key = 'lastActiveSpaceID'")
-                return (spaces, lastActiveSpaceID)
+            var spaces: [(SpaceRecord, [TabRecord])] = []
+            for spaceRecord in spaceRecords {
+                let tabRecords = try TabRecord
+                    .filter(Column("spaceID") == spaceRecord.id)
+                    .order(Column("sortOrder"))
+                    .fetchAll(db)
+                spaces.append((spaceRecord, tabRecords))
             }
-        } catch {
-            print("Failed to load session: \(error)")
-            return nil
+
+            let lastActiveSpaceID = try String.fetchOne(db, sql: "SELECT value FROM appState WHERE key = 'lastActiveSpaceID'")
+            return (spaces, lastActiveSpaceID)
         }
     }
 

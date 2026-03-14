@@ -185,19 +185,23 @@ class PeekOverlayView: NSView {
         )
     }
 
-    /// Returns a spring animation matching the open animation, suitable for applying to the peek
-    /// webview's layer so it scales up in sync with the chrome.
-    func webViewOpenAnimation() -> CASpringAnimation? {
-        guard let fromTransform = scaledDownTransform() else { return nil }
+    private func makeSpringAnimation(from: CATransform3D, to: CATransform3D) -> CASpringAnimation {
         let anim = CASpringAnimation(keyPath: "transform")
-        anim.fromValue = NSValue(caTransform3D: fromTransform)
-        anim.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+        anim.fromValue = NSValue(caTransform3D: from)
+        anim.toValue = NSValue(caTransform3D: to)
         anim.damping = 20
         anim.stiffness = 250
         anim.mass = 0.8
         anim.initialVelocity = 0
         anim.duration = anim.settlingDuration
         return anim
+    }
+
+    /// Returns a spring animation matching the open animation, suitable for applying to the peek
+    /// webview's layer so it scales up in sync with the chrome.
+    func webViewOpenAnimation() -> CASpringAnimation? {
+        guard let fromTransform = scaledDownTransform() else { return nil }
+        return makeSpringAnimation(from: fromTransform, to: CATransform3DIdentity)
     }
 
     /// Animate the overlay open. Call after the view is in the hierarchy and layout has been forced.
@@ -209,14 +213,7 @@ class PeekOverlayView: NSView {
 
         if let fromTransform = scaledDownTransform(), let layer = shadowContainer.layer {
             layer.transform = CATransform3DIdentity
-            let anim = CASpringAnimation(keyPath: "transform")
-            anim.fromValue = NSValue(caTransform3D: fromTransform)
-            anim.toValue = NSValue(caTransform3D: CATransform3DIdentity)
-            anim.damping = 20
-            anim.stiffness = 250
-            anim.mass = 0.8
-            anim.initialVelocity = 0
-            anim.duration = anim.settlingDuration
+            let anim = makeSpringAnimation(from: fromTransform, to: CATransform3DIdentity)
             layer.add(anim, forKey: "openScale")
         }
 
@@ -240,14 +237,7 @@ class PeekOverlayView: NSView {
 
         layer.transform = toTransform
 
-        let scaleAnim = CASpringAnimation(keyPath: "transform")
-        scaleAnim.fromValue = NSValue(caTransform3D: CATransform3DIdentity)
-        scaleAnim.toValue = NSValue(caTransform3D: toTransform)
-        scaleAnim.damping = 20
-        scaleAnim.stiffness = 250
-        scaleAnim.mass = 0.8
-        scaleAnim.initialVelocity = 0
-        scaleAnim.duration = scaleAnim.settlingDuration
+        let scaleAnim = makeSpringAnimation(from: CATransform3DIdentity, to: toTransform)
         scaleAnim.speed = -1
         scaleAnim.timeOffset = scaleAnim.settlingDuration
         layer.add(scaleAnim, forKey: "closeScale")

@@ -10,6 +10,23 @@ class DownloadItem: NSObject {
         case completed
         case failed(String)
         case cancelled
+
+        var persistenceString: String {
+            switch self {
+            case .downloading: "downloading"
+            case .completed: "completed"
+            case .failed: "failed"
+            case .cancelled: "cancelled"
+            }
+        }
+
+        init(persistenceString: String) {
+            switch persistenceString {
+            case "completed": self = .completed
+            case "cancelled": self = .cancelled
+            default: self = .failed("Interrupted")
+            }
+        }
     }
 
     let id: UUID
@@ -55,11 +72,7 @@ class DownloadItem: NSObject {
         self.fractionCompleted = record.totalBytes > 0 ? Double(record.bytesWritten) / Double(record.totalBytes) : 0
         super.init()
 
-        switch record.state {
-        case "completed": self.state = .completed
-        case "cancelled": self.state = .cancelled
-        default: self.state = .failed("Interrupted")
-        }
+        self.state = State(persistenceString: record.state)
     }
 }
 
@@ -98,7 +111,7 @@ class DownloadManager: NSObject {
     // MARK: - Observer Management
 
     func addObserver(_ observer: DownloadManagerObserver) {
-        observers.removeAll { $0.value == nil }
+        pruneObservers()
         observers.append(WeakDownloadObserver(value: observer))
     }
 
@@ -106,8 +119,12 @@ class DownloadManager: NSObject {
         observers.removeAll { $0.value === observer || $0.value == nil }
     }
 
-    private func notifyObservers(_ action: (DownloadManagerObserver) -> Void) {
+    private func pruneObservers() {
         observers.removeAll { $0.value == nil }
+    }
+
+    private func notifyObservers(_ action: (DownloadManagerObserver) -> Void) {
+        pruneObservers()
         for wrapper in observers {
             if let observer = wrapper.value {
                 action(observer)
@@ -176,14 +193,6 @@ class DownloadManager: NSObject {
         saveWorkItem = nil
 
         for item in items where item.state != .downloading {
-            let stateString: String
-            switch item.state {
-            case .completed: stateString = "completed"
-            case .failed: stateString = "failed"
-            case .cancelled: stateString = "cancelled"
-            case .downloading: continue
-            }
-
             let record = DownloadRecord(
                 id: item.id.uuidString,
                 filename: item.filename,
@@ -191,7 +200,7 @@ class DownloadManager: NSObject {
                 destinationURL: item.destinationURL?.path ?? "",
                 totalBytes: item.totalBytes,
                 bytesWritten: item.bytesWritten,
-                state: stateString,
+                state: item.state.persistenceString,
                 createdAt: item.createdAt,
                 completedAt: item.state == .completed ? Date() : nil
             )

@@ -1057,71 +1057,58 @@ extension TabSidebarViewController: NSTableViewDelegate {
             return cell
 
         case .pinnedTab(let index):
-            let cellID = NSUserInterfaceItemIdentifier("TabCell")
-            let cell: TabCellView
-            if let existing = tableView.makeView(withIdentifier: cellID, owner: nil) as? TabCellView {
-                cell = existing
-            } else {
-                cell = TabCellView()
-                cell.identifier = cellID
-            }
-            guard index < pinned.count else { return cell }
+            guard index < pinned.count else { return makeTabCell(tableView) }
             let tab = pinned[index]
-            cell.titleLabel.stringValue = tab.pinnedDisplayTitle
-            cell.toolTip = tab.title
-            cell.updateFavicon(tab.favicon)
-            cell.updateSleeping(tab.isSleeping)
-            cell.updateLoading(tab.isLoading)
-            cell.updateProgress(tab.estimatedProgress)
-            cell.updateAudio(isPlaying: tab.isPlayingAudio, isMuted: tab.isMuted)
-            cell.updatePinnedMode(tab: tab)
-            if isActive {
-                cell.onClose = { [weak self] in
-                    guard let self else { return }
-                    let row = self.tableView.row(for: cell)
-                    guard row >= 0, case .pinnedTab(let idx) = self.sidebarRow(for: row) else { return }
-                    self.delegate?.tabSidebar(self, didRequestClosePinnedTabAt: idx)
-                }
-                cell.onToggleMute = { tab.toggleMute() }
-            } else {
-                cell.onClose = nil
-                cell.onToggleMute = nil
+            let cell = makeTabCell(tableView)
+            configureTabCell(cell, tab: tab, title: tab.pinnedDisplayTitle, pinnedTab: tab, isActive: isActive) { [weak self] row in
+                guard let self, case .pinnedTab(let idx) = self.sidebarRow(for: row) else { return }
+                self.delegate?.tabSidebar(self, didRequestClosePinnedTabAt: idx)
             }
             return cell
 
         case .normalTab(let tabIndex):
             let tabsForTable = tabsForTableView(tableView)
-            let cellID = NSUserInterfaceItemIdentifier("TabCell")
-            let cell: TabCellView
-            if let existing = tableView.makeView(withIdentifier: cellID, owner: nil) as? TabCellView {
-                cell = existing
-            } else {
-                cell = TabCellView()
-                cell.identifier = cellID
-            }
-            guard tabIndex < tabsForTable.count else { return cell }
+            guard tabIndex < tabsForTable.count else { return makeTabCell(tableView) }
             let tab = tabsForTable[tabIndex]
-            cell.titleLabel.stringValue = tab.title
-            cell.toolTip = tab.title
-            cell.updateFavicon(tab.favicon)
-            cell.updateSleeping(tab.isSleeping)
-            cell.updateLoading(tab.isLoading)
-            cell.updateProgress(tab.estimatedProgress)
-            cell.updateAudio(isPlaying: tab.isPlayingAudio, isMuted: tab.isMuted)
-            cell.updatePinnedMode(tab: nil)
-            if isActive {
-                cell.onClose = { [weak self] in
-                    guard let self else { return }
-                    let row = self.tableView.row(for: cell)
-                    guard row >= 0, case .normalTab(let idx) = self.sidebarRow(for: row) else { return }
-                    self.delegate?.tabSidebar(self, didRequestCloseTabAt: idx)
-                }
-                cell.onToggleMute = { tab.toggleMute() }
-            } else {
-                cell.onClose = nil
-                cell.onToggleMute = nil
+            let cell = makeTabCell(tableView)
+            configureTabCell(cell, tab: tab, title: tab.title, pinnedTab: nil, isActive: isActive) { [weak self] row in
+                guard let self, case .normalTab(let idx) = self.sidebarRow(for: row) else { return }
+                self.delegate?.tabSidebar(self, didRequestCloseTabAt: idx)
             }
             return cell
+        }
+    }
+
+    private func makeTabCell(_ tableView: NSTableView) -> TabCellView {
+        let cellID = NSUserInterfaceItemIdentifier("TabCell")
+        if let existing = tableView.makeView(withIdentifier: cellID, owner: nil) as? TabCellView {
+            return existing
+        }
+        let cell = TabCellView()
+        cell.identifier = cellID
+        return cell
+    }
+
+    private func configureTabCell(_ cell: TabCellView, tab: BrowserTab, title: String, pinnedTab: BrowserTab?, isActive: Bool, onClose: @escaping (Int) -> Void) {
+        cell.titleLabel.stringValue = title
+        cell.toolTip = tab.title
+        cell.updateFavicon(tab.favicon)
+        cell.updateSleeping(tab.isSleeping)
+        cell.updateLoading(tab.isLoading)
+        cell.updateProgress(tab.estimatedProgress)
+        cell.updateAudio(isPlaying: tab.isPlayingAudio, isMuted: tab.isMuted)
+        cell.updatePinnedMode(tab: pinnedTab)
+        if isActive {
+            cell.onClose = { [weak self] in
+                guard let self else { return }
+                let row = self.tableView.row(for: cell)
+                guard row >= 0 else { return }
+                onClose(row)
+            }
+            cell.onToggleMute = { tab.toggleMute() }
+        } else {
+            cell.onClose = nil
+            cell.onToggleMute = nil
         }
     }
 

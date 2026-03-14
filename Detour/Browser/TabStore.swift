@@ -419,11 +419,8 @@ class TabStore {
 
     // MARK: - Tab Mutations
 
-    @discardableResult
-    func addTab(in space: Space, url: URL? = nil, afterTabID: UUID? = nil) -> BrowserTab {
-        let tab = BrowserTab(configuration: space.makeWebViewConfiguration())
+    private func insertTab(_ tab: BrowserTab, in space: Space, afterTabID: UUID?) -> Int {
         tab.spaceID = space.id
-
         let insertionIndex: Int
         if let afterTabID, let afterIndex = space.tabs.firstIndex(where: { $0.id == afterTabID }) {
             insertionIndex = afterIndex + 1
@@ -432,35 +429,24 @@ class TabStore {
             space.tabs.append(tab)
             insertionIndex = space.tabs.count - 1
         }
-
         subscribeToTab(tab, spaceID: space.id)
         notifyObservers { $0.tabStoreDidInsertTab(tab, at: insertionIndex, in: space) }
-
-        if let url {
-            tab.load(url)
-        }
-
         scheduleSave()
+        return insertionIndex
+    }
+
+    @discardableResult
+    func addTab(in space: Space, url: URL? = nil, afterTabID: UUID? = nil) -> BrowserTab {
+        let tab = BrowserTab(configuration: space.makeWebViewConfiguration())
+        insertTab(tab, in: space, afterTabID: afterTabID)
+        if let url { tab.load(url) }
         return tab
     }
 
     @discardableResult
     func addTab(in space: Space, webView: WKWebView, afterTabID: UUID? = nil) -> BrowserTab {
         let tab = BrowserTab(webView: webView)
-        tab.spaceID = space.id
-
-        let insertionIndex: Int
-        if let afterTabID, let afterIndex = space.tabs.firstIndex(where: { $0.id == afterTabID }) {
-            insertionIndex = afterIndex + 1
-            space.tabs.insert(tab, at: insertionIndex)
-        } else {
-            space.tabs.append(tab)
-            insertionIndex = space.tabs.count - 1
-        }
-
-        subscribeToTab(tab, spaceID: space.id)
-        notifyObservers { $0.tabStoreDidInsertTab(tab, at: insertionIndex, in: space) }
-        scheduleSave()
+        insertTab(tab, in: space, afterTabID: afterTabID)
         return tab
     }
 
@@ -666,34 +652,24 @@ class TabStore {
             }
         }
 
-        tab.$title
-            .dropFirst()
-            .receive(on: RunLoop.main)
-            .sink { [weak tab] _ in
-                guard let tab else { return }
-                notify(tab)
-            }
-            .store(in: &cancellables)
+        /// Subscribe to a tab property, calling notify on change. If `save` is true, also schedules a save.
+        func observe<T>(_ keyPath: KeyPath<BrowserTab, Published<T>.Publisher>, save: Bool = false) {
+            tab[keyPath: keyPath]
+                .dropFirst()
+                .receive(on: RunLoop.main)
+                .sink { [weak self, weak tab] _ in
+                    guard let tab else { return }
+                    notify(tab)
+                    if save { self?.scheduleSave() }
+                }
+                .store(in: &cancellables)
+        }
 
-        tab.$url
-            .dropFirst()
-            .receive(on: RunLoop.main)
-            .sink { [weak self, weak tab] _ in
-                guard let self, let tab else { return }
-                notify(tab)
-                self.scheduleSave()
-            }
-            .store(in: &cancellables)
-
-        tab.$favicon
-            .dropFirst()
-            .receive(on: RunLoop.main)
-            .sink { [weak self, weak tab] _ in
-                guard let self, let tab else { return }
-                notify(tab)
-                self.scheduleSave()
-            }
-            .store(in: &cancellables)
+        observe(\.$title)
+        observe(\.$url, save: true)
+        observe(\.$favicon, save: true)
+        observe(\.$isPlayingAudio)
+        observe(\.$isMuted)
 
         tab.$isLoading
             .dropFirst()
@@ -701,7 +677,6 @@ class TabStore {
             .sink { [weak self, weak tab] isLoading in
                 guard let self, let tab else { return }
                 notify(tab)
-                // Record history when page finishes loading
                 if !isLoading {
                     self.recordHistoryVisit(tab: tab, spaceID: spaceID)
                 }
@@ -711,24 +686,6 @@ class TabStore {
         tab.$estimatedProgress
             .dropFirst()
             .throttle(for: .milliseconds(100), scheduler: RunLoop.main, latest: true)
-            .sink { [weak tab] _ in
-                guard let tab else { return }
-                notify(tab)
-            }
-            .store(in: &cancellables)
-
-        tab.$isPlayingAudio
-            .dropFirst()
-            .receive(on: RunLoop.main)
-            .sink { [weak tab] _ in
-                guard let tab else { return }
-                notify(tab)
-            }
-            .store(in: &cancellables)
-
-        tab.$isMuted
-            .dropFirst()
-            .receive(on: RunLoop.main)
             .sink { [weak tab] _ in
                 guard let tab else { return }
                 notify(tab)

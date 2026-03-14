@@ -27,58 +27,36 @@ extension BrowserWindowController: WKUIDelegate {
 
     // MARK: - JavaScript Dialogs
 
-    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+    private func showJSAlert(from frame: WKFrameInfo, message: String, showCancel: Bool = false, accessoryView: NSView? = nil, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         let alert = NSAlert()
         alert.messageText = "\(frame.securityOrigin.host) says"
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
+        if showCancel { alert.addButton(withTitle: "Cancel") }
+        alert.accessoryView = accessoryView
 
         if let window = self.window {
-            alert.beginSheetModal(for: window) { _ in
-                completionHandler()
-            }
+            alert.beginSheetModal(for: window, completionHandler: completion)
         } else {
-            completionHandler()
+            completion(.alertSecondButtonReturn)
         }
     }
 
-    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
-        let alert = NSAlert()
-        alert.messageText = "\(frame.securityOrigin.host) says"
-        alert.informativeText = message
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        showJSAlert(from: frame, message: message) { _ in completionHandler() }
+    }
 
-        if let window = self.window {
-            alert.beginSheetModal(for: window) { response in
-                completionHandler(response == .alertFirstButtonReturn)
-            }
-        } else {
-            completionHandler(false)
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        showJSAlert(from: frame, message: message, showCancel: true) { response in
+            completionHandler(response == .alertFirstButtonReturn)
         }
     }
 
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
-        let alert = NSAlert()
-        alert.messageText = "\(frame.securityOrigin.host) says"
-        alert.informativeText = prompt
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-
         let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         textField.stringValue = defaultText ?? ""
-        alert.accessoryView = textField
-
-        if let window = self.window {
-            alert.beginSheetModal(for: window) { response in
-                if response == .alertFirstButtonReturn {
-                    completionHandler(textField.stringValue)
-                } else {
-                    completionHandler(nil)
-                }
-            }
-        } else {
-            completionHandler(nil)
+        showJSAlert(from: frame, message: prompt, showCancel: true, accessoryView: textField) { response in
+            completionHandler(response == .alertFirstButtonReturn ? textField.stringValue : nil)
         }
     }
 

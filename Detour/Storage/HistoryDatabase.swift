@@ -102,13 +102,9 @@ struct HistoryDatabase {
     }
 
     func searchHistory(query: String, spaceID: String, limit: Int = 10) -> [HistoryURL] {
+        let ftsSpecialChars = CharacterSet(charactersIn: "\"'*()")
         let tokens = query.components(separatedBy: .whitespaces)
-            .map { $0.replacingOccurrences(of: "\"", with: "")
-                    .replacingOccurrences(of: "'", with: "")
-                    .replacingOccurrences(of: "*", with: "")
-                    .replacingOccurrences(of: "(", with: "")
-                    .replacingOccurrences(of: ")", with: "")
-                    .trimmingCharacters(in: .whitespaces) }
+            .map { $0.unicodeScalars.filter { !ftsSpecialChars.contains($0) }.map(String.init).joined() }
             .filter { !$0.isEmpty }
         guard !tokens.isEmpty else { return [] }
 

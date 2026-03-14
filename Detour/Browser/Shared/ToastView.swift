@@ -70,10 +70,6 @@ class ToastView: NSView {
         shadow?.shadowColor = NSColor.black.withAlphaComponent(0.25)
         shadow?.shadowOffset = NSSize(width: 0, height: -2)
         shadow?.shadowBlurRadius = 8
-        layer?.shadowRadius = 8
-        layer?.shadowColor = NSColor.black.withAlphaComponent(0.25).cgColor
-        layer?.shadowOffset = NSSize(width: 0, height: -2)
-        layer?.shadowOpacity = 1
 
         label.font = .boldSystemFont(ofSize: 13)
         label.textColor = .secondaryLabelColor
