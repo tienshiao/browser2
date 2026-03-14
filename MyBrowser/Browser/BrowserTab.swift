@@ -81,6 +81,9 @@ class BrowserTab: NSObject {
         self.canGoBack = webView.canGoBack
         self.canGoForward = webView.canGoForward
         setupObservers()
+        if !webView.isLoading {
+            fetchFavicon()
+        }
     }
 
     convenience init(id: UUID, title: String, archivedInteractionState: Data?, fallbackURL: URL?, faviconURL: URL? = nil, configuration: WKWebViewConfiguration = WKWebViewConfiguration()) {
