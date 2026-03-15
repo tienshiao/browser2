@@ -1,0 +1,132 @@
+import AppKit
+
+// MARK: - TabSidebarDelegate
+
+extension BrowserWindowController: TabSidebarDelegate {
+    func tabSidebarDidRequestNewTab(_ sidebar: TabSidebarViewController) {
+        showCommandPalette()
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didSelectTabAt index: Int) {
+        let tabs = currentTabs
+        guard index >= 0, index < tabs.count else { return }
+        selectTab(id: tabs[index].id)
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestCloseTabAt index: Int) {
+        let tabs = currentTabs
+        guard index >= 0, index < tabs.count else { return }
+        closeTab(at: index, wasSelected: tabs[index].id == selectedTabID)
+    }
+
+    func tabSidebarDidRequestGoBack(_ sidebar: TabSidebarViewController) {
+        navigateBackOrCloseChildTab()
+    }
+
+    func tabSidebarDidRequestGoForward(_ sidebar: TabSidebarViewController) {
+        ensureOwnsWebView()
+        selectedTab?.webView?.goForward()
+    }
+
+    func tabSidebarDidRequestReload(_ sidebar: TabSidebarViewController) {
+        ensureOwnsWebView()
+        selectedTab?.reload()
+    }
+
+    func tabSidebarDidRequestOpenCommandPalette(_ sidebar: TabSidebarViewController, anchorFrame: NSRect) {
+        commandPaletteNavigatesInPlace = true
+        showCommandPalette(initialText: selectedTab?.url?.absoluteString, anchorFrame: anchorFrame)
+    }
+
+    func tabSidebarDidRequestToggleSidebar(_ sidebar: TabSidebarViewController) {
+        toggleSidebarAutoHide()
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didSelectPinnedTabAt index: Int) {
+        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
+        selectTab(id: space.pinnedTabs[index].id)
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestClosePinnedTabAt index: Int) {
+        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
+        let tab = space.pinnedTabs[index]
+        let wasSelected = tab.id == selectedTabID
+        if wasSelected {
+            closePinnedTab(at: index)
+        } else {
+            store.closePinnedTab(id: tab.id, in: space)
+        }
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didMoveTabFrom sourceIndex: Int, to destinationIndex: Int) {
+        guard let space = activeSpace else { return }
+        let adjustedDestination = sourceIndex < destinationIndex ? destinationIndex - 1 : destinationIndex
+        store.moveTab(from: sourceIndex, to: adjustedDestination, in: space)
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didMovePinnedTabFrom sourceIndex: Int, to destinationIndex: Int) {
+        guard let space = activeSpace else { return }
+        store.movePinnedTab(from: sourceIndex, to: destinationIndex, in: space)
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didDragTabToPinAt index: Int, destinationIndex: Int) {
+        guard let space = activeSpace, index >= 0, index < space.tabs.count else { return }
+        let tab = space.tabs[index]
+        guard tab.url != nil else { return }
+        store.pinTab(id: tab.id, in: space, at: destinationIndex)
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didDragPinnedTabToUnpinAt index: Int, destinationIndex: Int) {
+        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
+        store.unpinTab(id: space.pinnedTabs[index].id, in: space, at: destinationIndex)
+    }
+
+    func tabSidebarDidRequestSwitchToSpace(_ sidebar: TabSidebarViewController, spaceID: UUID) {
+        setActiveSpace(id: spaceID)
+    }
+
+    func tabSidebarDidRequestAddSpace(_ sidebar: TabSidebarViewController, sourceButton: NSButton) {
+        showAddSpacePopover(relativeTo: sourceButton)
+    }
+
+    func tabSidebarDidRequestEditSpace(_ sidebar: TabSidebarViewController, spaceID: UUID, sourceButton: NSButton) {
+        showEditSpacePopover(spaceID: spaceID, relativeTo: sourceButton)
+    }
+
+    func tabSidebarDidRequestShowDownloads(_ sidebar: TabSidebarViewController, sourceButton: NSButton) {
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 320, height: 300)
+        popover.contentViewController = DownloadPopoverViewController()
+        popover.show(relativeTo: sourceButton.bounds, of: sourceButton, preferredEdge: .minY)
+    }
+
+    func tabSidebarDidRequestDeleteSpace(_ sidebar: TabSidebarViewController, spaceID: UUID) {
+        guard let space = store.space(withID: spaceID) else { return }
+
+        if !space.tabs.isEmpty || !space.pinnedTabs.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "Cannot Delete Space"
+            alert.informativeText = "Close or move all tabs first before deleting this space."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Delete \"\(space.name)\"?"
+        alert.informativeText = "This action cannot be undone."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let wasActive = (activeSpaceID == spaceID)
+        store.deleteSpace(id: spaceID)
+
+        if wasActive, let firstSpace = store.spaces.first {
+            setActiveSpace(id: firstSpace.id)
+        }
+    }
+}

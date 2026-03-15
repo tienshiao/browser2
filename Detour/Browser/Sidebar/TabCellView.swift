@@ -11,7 +11,7 @@ class TabRowView: NSTableRowView {
         }
         let alpha: CGFloat = isEmphasized ? 0.35 : 0.15
         color.withAlphaComponent(alpha).setFill()
-        NSBezierPath(roundedRect: selectionRect, xRadius: 6, yRadius: 6).fill()
+        NSBezierPath(roundedRect: selectionRect, xRadius: UIConstants.defaultCornerRadius, yRadius: UIConstants.defaultCornerRadius).fill()
     }
 
     /// The inset rect the source list uses for its selection highlight
@@ -68,12 +68,12 @@ class TabCellView: NSTableCellView {
         // Progress bar (Option B) — frame managed in layout(), no constraints
         progressView.wantsLayer = true
         progressView.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.05).cgColor
-        progressView.layer?.cornerRadius = 6
+        progressView.layer?.cornerRadius = UIConstants.defaultCornerRadius
         progressView.alphaValue = 0
         addSubview(progressView, positioned: .below, relativeTo: nil)
 
         hoverBackground.wantsLayer = true
-        hoverBackground.layer?.cornerRadius = 6
+        hoverBackground.layer?.cornerRadius = UIConstants.defaultCornerRadius
         hoverBackground.isHidden = true
         addSubview(hoverBackground, positioned: .below, relativeTo: nil)
 
@@ -184,7 +184,7 @@ class TabCellView: NSTableCellView {
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
         closeButton.isHidden = false
-        hoverBackground.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+        hoverBackground.layer?.backgroundColor = UIConstants.hoverBackgroundColor.cgColor
         hoverBackground.isHidden = false
         updateLayoutState()
     }
@@ -208,7 +208,7 @@ class TabCellView: NSTableCellView {
         if shouldHover {
             isHovered = true
             closeButton.isHidden = false
-            hoverBackground.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+            hoverBackground.layer?.backgroundColor = UIConstants.hoverBackgroundColor.cgColor
             hoverBackground.isHidden = false
         } else {
             isHovered = false
@@ -452,7 +452,7 @@ class NewTabCellView: NSTableCellView {
         wantsLayer = true
 
         hoverBackground.wantsLayer = true
-        hoverBackground.layer?.cornerRadius = 6
+        hoverBackground.layer?.cornerRadius = UIConstants.defaultCornerRadius
         hoverBackground.isHidden = true
         addSubview(hoverBackground, positioned: .below, relativeTo: nil)
 
@@ -499,7 +499,7 @@ class NewTabCellView: NSTableCellView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        hoverBackground.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+        hoverBackground.layer?.backgroundColor = UIConstants.hoverBackgroundColor.cgColor
         hoverBackground.isHidden = false
     }
 
@@ -513,7 +513,7 @@ class NewTabCellView: NSTableCellView {
         let mouseInSelf = convert(mouseInWindow, from: nil)
         let shouldHover = bounds.contains(mouseInSelf)
         if shouldHover {
-            hoverBackground.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+            hoverBackground.layer?.backgroundColor = UIConstants.hoverBackgroundColor.cgColor
             hoverBackground.isHidden = false
         } else {
             hoverBackground.isHidden = true

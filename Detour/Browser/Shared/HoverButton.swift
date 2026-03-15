@@ -8,7 +8,7 @@ class HoverButton: NSButton {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         hoverBackground.wantsLayer = true
-        hoverBackground.layer?.cornerRadius = 6
+        hoverBackground.layer?.cornerRadius = UIConstants.defaultCornerRadius
         hoverBackground.isHidden = true
         addSubview(hoverBackground, positioned: .below, relativeTo: nil)
     }
@@ -30,7 +30,7 @@ class HoverButton: NSButton {
         } else {
             // Match the source list selection inset: 10pt from each side of the full sidebar width
             hoverBackground.frame = bounds.insetBy(dx: 10, dy: 1)
-            hoverBackground.layer?.cornerRadius = 6
+            hoverBackground.layer?.cornerRadius = UIConstants.defaultCornerRadius
         }
     }
 
@@ -48,7 +48,7 @@ class HoverButton: NSButton {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        hoverBackground.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+        hoverBackground.layer?.backgroundColor = UIConstants.hoverBackgroundColor.cgColor
         hoverBackground.isHidden = false
     }
 

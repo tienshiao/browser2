@@ -32,7 +32,7 @@ class FauxAddressBar: NSView {
     private func setup() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
-        layer?.cornerRadius = 6
+        layer?.cornerRadius = UIConstants.defaultCornerRadius
         layer?.borderWidth = 0.5
         layer?.borderColor = NSColor.separatorColor.cgColor
 

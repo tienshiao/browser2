@@ -25,8 +25,8 @@ class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource, NS
     var profile: Profile?
 
     private let textField = CommandPaletteTextField()
-    private let shadowContainer = NSView()
-    private let box = NSView()
+    private let glassContainer = GlassContainerView(cornerRadius: 12)
+    private var box: NSView { glassContainer.contentView }
     private let searchIcon = NSImageView()
     private let separator = NSBox()
     private let scrollView = NSScrollView()
@@ -59,49 +59,7 @@ class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource, NS
     required init?(coder: NSCoder) { fatalError() }
 
     private func setup() {
-        // Shadow container
-        shadowContainer.wantsLayer = true
-        shadowContainer.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(shadowContainer)
-
-        // Palette box (plain container for all content subviews)
-        box.translatesAutoresizingMaskIntoConstraints = false
-
-        // Effect view backing
-        let effectView: NSView
-        if #available(macOS 26.0, *) {
-            let glass = NSGlassEffectView()
-            glass.cornerRadius = 12
-            glass.translatesAutoresizingMaskIntoConstraints = false
-            glass.contentView = box
-            shadowContainer.addSubview(glass)
-            effectView = glass
-        } else {
-            shadowContainer.shadow = NSShadow()
-            shadowContainer.layer?.shadowColor = NSColor.black.cgColor
-            shadowContainer.layer?.shadowOpacity = 0.5
-            shadowContainer.layer?.shadowOffset = CGSize(width: 0, height: -2)
-            shadowContainer.layer?.shadowRadius = 20
-
-            let vev = NSVisualEffectView()
-            vev.material = .hudWindow
-            vev.blendingMode = .withinWindow
-            vev.state = .active
-            vev.wantsLayer = true
-            vev.layer?.cornerRadius = 12
-            vev.layer?.masksToBounds = true
-            vev.translatesAutoresizingMaskIntoConstraints = false
-            vev.addSubview(box)
-            shadowContainer.addSubview(vev)
-            effectView = vev
-
-            NSLayoutConstraint.activate([
-                box.topAnchor.constraint(equalTo: vev.topAnchor),
-                box.bottomAnchor.constraint(equalTo: vev.bottomAnchor),
-                box.leadingAnchor.constraint(equalTo: vev.leadingAnchor),
-                box.trailingAnchor.constraint(equalTo: vev.trailingAnchor),
-            ])
-        }
+        addSubview(glassContainer)
 
         // Search icon
         searchIcon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)
@@ -159,19 +117,14 @@ class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource, NS
         boxBottomToTextField = textField.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -12)
         boxBottomToScroll = scrollView.bottomAnchor.constraint(equalTo: box.bottomAnchor)
 
-        centerXConstraint = shadowContainer.centerXAnchor.constraint(equalTo: safeAreaLayoutGuide.centerXAnchor)
-        centerYConstraint = NSLayoutConstraint(item: shadowContainer, attribute: .top, relatedBy: .equal,
+        centerXConstraint = glassContainer.centerXAnchor.constraint(equalTo: safeAreaLayoutGuide.centerXAnchor)
+        centerYConstraint = NSLayoutConstraint(item: glassContainer, attribute: .top, relatedBy: .equal,
                                toItem: self, attribute: .bottom, multiplier: 0.35, constant: 0)
 
         NSLayoutConstraint.activate([
             centerXConstraint,
             centerYConstraint,
-            shadowContainer.widthAnchor.constraint(equalToConstant: 500),
-
-            effectView.topAnchor.constraint(equalTo: shadowContainer.topAnchor),
-            effectView.bottomAnchor.constraint(equalTo: shadowContainer.bottomAnchor),
-            effectView.leadingAnchor.constraint(equalTo: shadowContainer.leadingAnchor),
-            effectView.trailingAnchor.constraint(equalTo: shadowContainer.trailingAnchor),
+            glassContainer.widthAnchor.constraint(equalToConstant: 500),
 
             searchIcon.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 16),
             searchIcon.centerYAnchor.constraint(equalTo: textField.centerYAnchor),
@@ -197,7 +150,7 @@ class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource, NS
 
     override func mouseDown(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
-        if !shadowContainer.frame.contains(location) {
+        if !glassContainer.frame.contains(location) {
             dismiss()
         }
     }
@@ -222,8 +175,8 @@ class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource, NS
             // parentView uses non-flipped coords (origin bottom-left).
             // localFrame.maxY = top edge of anchor. Distance from parent top = parentView.bounds.height - localFrame.maxY.
             // The palette overlay is pinned to match parentView, so use the same offsets.
-            anchorLeadingConstraint = shadowContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: localFrame.minX)
-            anchorTopConstraint = shadowContainer.topAnchor.constraint(equalTo: topAnchor, constant: parentView.bounds.height - localFrame.maxY)
+            anchorLeadingConstraint = glassContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: localFrame.minX)
+            anchorTopConstraint = glassContainer.topAnchor.constraint(equalTo: topAnchor, constant: parentView.bounds.height - localFrame.maxY)
             anchorLeadingConstraint?.isActive = true
             anchorTopConstraint?.isActive = true
         }

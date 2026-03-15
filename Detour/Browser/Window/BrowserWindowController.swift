@@ -8,9 +8,9 @@ extension Notification.Name {
 
 class BrowserWindowController: NSWindowController {
     private let splitViewController = NSSplitViewController()
-    private let tabSidebar = TabSidebarViewController()
-    private let contentContainerView = NSView()
-    private var sidebarItem: NSSplitViewItem!
+    let tabSidebar = TabSidebarViewController()
+    let contentContainerView = NSView()
+    var sidebarItem: NSSplitViewItem!
     private var contentItem: NSSplitViewItem!
     private var sidebarCollapseObservation: NSKeyValueObservation?
     private var sidebarAutoHides = false
@@ -33,7 +33,7 @@ class BrowserWindowController: NSWindowController {
     private var lastFindQuery = ""
 
     private var commandPaletteView: CommandPaletteView?
-    private var commandPaletteNavigatesInPlace = false
+    var commandPaletteNavigatesInPlace = false
     private var splitScrimView: NSView?
     private var contentScrimView: NSView?
 
@@ -45,29 +45,29 @@ class BrowserWindowController: NSWindowController {
     }
     var contextMenuLinkAction: ContextMenuLinkAction = .none
 
-    private var peekOverlayView: PeekOverlayView?
+    var peekOverlayView: PeekOverlayView?
     private var peekWebView: WKWebView?
     private var peekWebViewTopConstraint: NSLayoutConstraint?
     private var peekWebViewBottomConstraint: NSLayoutConstraint?
     private var peekWebViewLeadingConstraint: NSLayoutConstraint?
     private var peekWebViewTrailingConstraint: NSLayoutConstraint?
 
-    private var store: TabStore { TabStore.shared }
+    var store: TabStore { TabStore.shared }
 
     // MARK: - Per-window space state
 
-    private(set) var activeSpaceID: UUID?
+    var activeSpaceID: UUID?
 
     var activeSpace: Space? {
         guard let activeSpaceID else { return nil }
         return store.space(withID: activeSpaceID)
     }
 
-    private var currentTabs: [BrowserTab] {
+    var currentTabs: [BrowserTab] {
         activeSpace?.tabs ?? []
     }
 
-    private var selectedTab: BrowserTab? {
+    var selectedTab: BrowserTab? {
         guard let selectedTabID else { return nil }
         return activeSpace?.pinnedTabs.first { $0.id == selectedTabID }
             ?? currentTabs.first { $0.id == selectedTabID }
@@ -289,7 +289,7 @@ class BrowserWindowController: NSWindowController {
         tabSidebar.view.addTrackingArea(sidebarArea)
     }
 
-    private func toggleSidebarAutoHide() {
+    func toggleSidebarAutoHide() {
         autoHideWorkItem?.cancel()
         autoHideWorkItem = nil
         sidebarOpenedByHover = false
@@ -412,7 +412,7 @@ class BrowserWindowController: NSWindowController {
         })
     }
 
-    private func performFind(_ text: String, backwards: Bool) {
+    func performFind(_ text: String, backwards: Bool) {
         guard let webView = selectedTab?.webView else { return }
 
         let isNewQuery = text != lastFindQuery
@@ -666,13 +666,13 @@ class BrowserWindowController: NSWindowController {
 
     // MARK: - Navigation
 
-    private func ensureOwnsWebView() {
+    func ensureOwnsWebView() {
         if !ownsWebView, let tab = selectedTab {
             claimWebView(for: tab)
         }
     }
 
-    private func navigateToAddress(_ input: String) {
+    func navigateToAddress(_ input: String) {
         guard selectedTab != nil else { return }
         let trimmed = input.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
@@ -684,7 +684,7 @@ class BrowserWindowController: NSWindowController {
         }
     }
 
-    private func urlFromInput(_ input: String) -> URL? {
+    func urlFromInput(_ input: String) -> URL? {
         if input.hasPrefix("http://") || input.hasPrefix("https://") {
             return URL(string: input)
         }
@@ -725,7 +725,7 @@ class BrowserWindowController: NSWindowController {
             ?? activeSpace?.pinnedTabs.first { $0.id == parentID }
     }
 
-    private func navigateBackOrCloseChildTab() {
+    func navigateBackOrCloseChildTab() {
         guard let tab = selectedTab else { return }
         if tab.canGoBack {
             ensureOwnsWebView()
@@ -762,7 +762,7 @@ class BrowserWindowController: NSWindowController {
         showCommandPalette(initialText: selectedTab?.url?.absoluteString)
     }
 
-    private func showCommandPalette(initialText: String? = nil, anchorFrame: NSRect? = nil) {
+    func showCommandPalette(initialText: String? = nil, anchorFrame: NSRect? = nil) {
         guard commandPaletteView == nil else { return }
         let palette = CommandPaletteView()
         palette.delegate = self
@@ -805,7 +805,7 @@ class BrowserWindowController: NSWindowController {
         palette.show(in: window!.contentView!, initialText: initialText, anchorFrame: anchorFrame)
     }
 
-    private func dismissCommandPalette() {
+    func dismissCommandPalette() {
         commandPaletteView?.removeFromSuperview()
         commandPaletteView = nil
         commandPaletteNavigatesInPlace = false
@@ -853,7 +853,7 @@ class BrowserWindowController: NSWindowController {
         closeTab(at: index, wasSelected: true)
     }
 
-    private func closePinnedTab(at index: Int) {
+    func closePinnedTab(at index: Int) {
         guard let space = activeSpace else { return }
         let tab = space.pinnedTabs[index]
 
@@ -880,7 +880,7 @@ class BrowserWindowController: NSWindowController {
         }
     }
 
-    private func closeTab(at index: Int, wasSelected: Bool) {
+    func closeTab(at index: Int, wasSelected: Bool) {
         guard let space = activeSpace else { return }
         let tabs = currentTabs
         guard index >= 0, index < tabs.count else { return }
@@ -914,7 +914,7 @@ class BrowserWindowController: NSWindowController {
 
     // MARK: - Peek Overlay
 
-    private func showPeekOverlay(url: URL, clickPoint: CGPoint? = nil) {
+    func showPeekOverlay(url: URL, clickPoint: CGPoint? = nil) {
         guard let space = activeSpace else { return }
         dismissPeekOverlay()
 
@@ -1060,7 +1060,7 @@ class BrowserWindowController: NSWindowController {
 
     // MARK: - Add Space Popover
 
-    private func showAddSpacePopover(relativeTo button: NSButton) {
+    func showAddSpacePopover(relativeTo button: NSButton) {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 240, height: 210)
@@ -1076,7 +1076,7 @@ class BrowserWindowController: NSWindowController {
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
-    private func showEditSpacePopover(spaceID: UUID, relativeTo button: NSButton) {
+    func showEditSpacePopover(spaceID: UUID, relativeTo button: NSButton) {
         guard let space = store.space(withID: spaceID) else { return }
 
         let popover = NSPopover()
@@ -1147,228 +1147,6 @@ extension BrowserWindowController: NSToolbarDelegate {
     }
 }
 
-// MARK: - TabSidebarDelegate
-
-extension BrowserWindowController: TabSidebarDelegate {
-    func tabSidebarDidRequestNewTab(_ sidebar: TabSidebarViewController) {
-        showCommandPalette()
-    }
-
-    func tabSidebar(_ sidebar: TabSidebarViewController, didSelectTabAt index: Int) {
-        let tabs = currentTabs
-        guard index >= 0, index < tabs.count else { return }
-        selectTab(id: tabs[index].id)
-    }
-
-    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestCloseTabAt index: Int) {
-        let tabs = currentTabs
-        guard index >= 0, index < tabs.count else { return }
-        closeTab(at: index, wasSelected: tabs[index].id == selectedTabID)
-    }
-
-    func tabSidebarDidRequestGoBack(_ sidebar: TabSidebarViewController) {
-        navigateBackOrCloseChildTab()
-    }
-
-    func tabSidebarDidRequestGoForward(_ sidebar: TabSidebarViewController) {
-        ensureOwnsWebView()
-        selectedTab?.webView?.goForward()
-    }
-
-    func tabSidebarDidRequestReload(_ sidebar: TabSidebarViewController) {
-        ensureOwnsWebView()
-        selectedTab?.reload()
-    }
-
-    func tabSidebarDidRequestOpenCommandPalette(_ sidebar: TabSidebarViewController, anchorFrame: NSRect) {
-        commandPaletteNavigatesInPlace = true
-        showCommandPalette(initialText: selectedTab?.url?.absoluteString, anchorFrame: anchorFrame)
-    }
-
-    func tabSidebarDidRequestToggleSidebar(_ sidebar: TabSidebarViewController) {
-        toggleSidebarAutoHide()
-    }
-
-    func tabSidebar(_ sidebar: TabSidebarViewController, didSelectPinnedTabAt index: Int) {
-        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
-        selectTab(id: space.pinnedTabs[index].id)
-    }
-
-    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestClosePinnedTabAt index: Int) {
-        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
-        let tab = space.pinnedTabs[index]
-        let wasSelected = tab.id == selectedTabID
-        if wasSelected {
-            closePinnedTab(at: index)
-        } else {
-            store.closePinnedTab(id: tab.id, in: space)
-        }
-    }
-
-    func tabSidebar(_ sidebar: TabSidebarViewController, didMoveTabFrom sourceIndex: Int, to destinationIndex: Int) {
-        guard let space = activeSpace else { return }
-        let adjustedDestination = sourceIndex < destinationIndex ? destinationIndex - 1 : destinationIndex
-        store.moveTab(from: sourceIndex, to: adjustedDestination, in: space)
-    }
-
-    func tabSidebar(_ sidebar: TabSidebarViewController, didMovePinnedTabFrom sourceIndex: Int, to destinationIndex: Int) {
-        guard let space = activeSpace else { return }
-        store.movePinnedTab(from: sourceIndex, to: destinationIndex, in: space)
-    }
-
-    func tabSidebar(_ sidebar: TabSidebarViewController, didDragTabToPinAt index: Int, destinationIndex: Int) {
-        guard let space = activeSpace, index >= 0, index < space.tabs.count else { return }
-        let tab = space.tabs[index]
-        guard tab.url != nil else { return }
-        store.pinTab(id: tab.id, in: space, at: destinationIndex)
-    }
-
-    func tabSidebar(_ sidebar: TabSidebarViewController, didDragPinnedTabToUnpinAt index: Int, destinationIndex: Int) {
-        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
-        store.unpinTab(id: space.pinnedTabs[index].id, in: space, at: destinationIndex)
-    }
-
-    func tabSidebarDidRequestSwitchToSpace(_ sidebar: TabSidebarViewController, spaceID: UUID) {
-        setActiveSpace(id: spaceID)
-    }
-
-    func tabSidebarDidRequestAddSpace(_ sidebar: TabSidebarViewController, sourceButton: NSButton) {
-        showAddSpacePopover(relativeTo: sourceButton)
-    }
-
-    func tabSidebarDidRequestEditSpace(_ sidebar: TabSidebarViewController, spaceID: UUID, sourceButton: NSButton) {
-        showEditSpacePopover(spaceID: spaceID, relativeTo: sourceButton)
-    }
-
-    func tabSidebarDidRequestShowDownloads(_ sidebar: TabSidebarViewController, sourceButton: NSButton) {
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentSize = NSSize(width: 320, height: 300)
-        popover.contentViewController = DownloadPopoverViewController()
-        popover.show(relativeTo: sourceButton.bounds, of: sourceButton, preferredEdge: .minY)
-    }
-
-    func tabSidebarDidRequestDeleteSpace(_ sidebar: TabSidebarViewController, spaceID: UUID) {
-        guard let space = store.space(withID: spaceID) else { return }
-
-        if !space.tabs.isEmpty || !space.pinnedTabs.isEmpty {
-            let alert = NSAlert()
-            alert.messageText = "Cannot Delete Space"
-            alert.informativeText = "Close or move all tabs first before deleting this space."
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
-            return
-        }
-
-        let alert = NSAlert()
-        alert.messageText = "Delete \"\(space.name)\"?"
-        alert.informativeText = "This action cannot be undone."
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
-        alert.buttons.first?.hasDestructiveAction = true
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        let wasActive = (activeSpaceID == spaceID)
-        store.deleteSpace(id: spaceID)
-
-        if wasActive, let firstSpace = store.spaces.first {
-            setActiveSpace(id: firstSpace.id)
-        }
-    }
-}
-
-// MARK: - TabStoreObserver
-
-extension BrowserWindowController: TabStoreObserver {
-    func tabStoreDidInsertTab(_ tab: BrowserTab, at index: Int, in space: Space) {
-        guard space.id == activeSpaceID else { return }
-        tabSidebar.insertTab(at: index, tabs: space.tabs)
-
-        if sidebarItem.isCollapsed {
-            toastManager.show(message: "Opened new tab in background")
-        }
-    }
-
-    func tabStoreDidRemoveTab(_ tab: BrowserTab, at index: Int, in space: Space) {
-        guard space.id == activeSpaceID else { return }
-        tabSidebar.removeTab(at: index, tabs: space.tabs)
-    }
-
-    func tabStoreDidReorderTabs(in space: Space) {
-        guard space.id == activeSpaceID else { return }
-        tabSidebar.setTabs(pinned: space.pinnedTabs, normal: space.tabs)
-        if let selectedTabID, let index = currentTabs.firstIndex(where: { $0.id == selectedTabID }) {
-            tabSidebar.selectedTabIndex = index
-        }
-    }
-
-    func tabStoreDidUpdateTab(_ tab: BrowserTab, at index: Int, in space: Space) {
-        guard space.id == activeSpaceID else { return }
-        tabSidebar.reloadTab(at: index)
-    }
-
-    // Pinned tab observer methods
-
-    func tabStoreDidInsertPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
-        guard space.id == activeSpaceID else { return }
-        tabSidebar.insertPinnedTab(at: index, pinnedTabs: space.pinnedTabs)
-    }
-
-    func tabStoreDidRemovePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
-        guard space.id == activeSpaceID else { return }
-        tabSidebar.removePinnedTab(at: index, pinnedTabs: space.pinnedTabs)
-    }
-
-    func tabStoreDidPinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space) {
-        guard space.id == activeSpaceID else { return }
-        tabSidebar.pinTab(fromNormalIndex: fromIndex, toPinnedIndex: toIndex,
-                          tabs: space.tabs, pinnedTabs: space.pinnedTabs)
-    }
-
-    func tabStoreDidUnpinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space) {
-        guard space.id == activeSpaceID else { return }
-        tabSidebar.unpinTab(fromPinnedIndex: fromIndex, toNormalIndex: toIndex,
-                            tabs: space.tabs, pinnedTabs: space.pinnedTabs)
-    }
-
-    func tabStoreDidReorderPinnedTabs(in space: Space) {
-        guard space.id == activeSpaceID else { return }
-        tabSidebar.pinnedTabs = space.pinnedTabs
-        if let selectedTabID, let index = space.pinnedTabs.firstIndex(where: { $0.id == selectedTabID }) {
-            tabSidebar.selectedPinnedTabIndex = index
-        }
-    }
-
-    func tabStoreDidUpdatePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
-        guard space.id == activeSpaceID else { return }
-        tabSidebar.reloadPinnedTab(at: index)
-    }
-
-    func tabStoreDidResetPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
-        guard space.id == activeSpaceID else { return }
-        tabSidebar.reloadPinnedTab(at: index)
-    }
-
-    func tabStoreDidUpdateSpaces() {
-        if isIncognito {
-            // Incognito windows only show their own space; never switch away
-            if let space = activeSpace {
-                tabSidebar.updateSpaceButtons(spaces: [space], activeSpaceID: activeSpaceID)
-            }
-            return
-        }
-
-        let nonIncognitoSpaces = store.spaces.filter { !$0.isIncognito }
-        tabSidebar.updateSpaceButtons(spaces: nonIncognitoSpaces, activeSpaceID: activeSpaceID)
-
-        // If our active space was deleted, switch to the first available space
-        if activeSpaceID == nil || store.space(withID: activeSpaceID!) == nil, let firstSpace = nonIncognitoSpaces.first {
-            setActiveSpace(id: firstSpace.id)
-        }
-    }
-}
-
 // MARK: - CommandPaletteDelegate
 
 extension BrowserWindowController: CommandPaletteDelegate {
@@ -1422,190 +1200,6 @@ extension BrowserWindowController: WKScriptMessageHandler {
             linkStatusBar.hide()
         } else {
             linkStatusBar.show(url: urlString)
-        }
-    }
-}
-
-// MARK: - WKNavigationDelegate
-
-extension BrowserWindowController: WKNavigationDelegate {
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
-        if navigationAction.navigationType == .linkActivated && navigationAction.modifierFlags.contains(.command) {
-            if let url = navigationAction.request.url, let space = activeSpace {
-                _ = store.addTab(in: space, url: url, parentID: selectedTabID)
-            }
-            return .cancel
-        }
-
-        // Shift+click: open link in peek view
-        if navigationAction.navigationType == .linkActivated,
-           navigationAction.modifierFlags.contains(.shift),
-           let url = navigationAction.request.url,
-           let tab = selectedTab,
-           webView === tab.webView,
-           peekOverlayView == nil {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let clickPoint = self.window.map {
-                    self.contentContainerView.convert($0.mouseLocationOutsideOfEventStream, from: nil)
-                }
-                self.showPeekOverlay(url: url, clickPoint: clickPoint)
-            }
-            return .cancel
-        }
-
-        // When navigating forward into an error page, re-attempt the original URL instead
-        if navigationAction.navigationType == .backForward,
-           let url = navigationAction.request.url,
-           let originalURL = ErrorPage.originalURL(from: url) {
-            DispatchQueue.main.async { [weak self] in
-                self?.selectedTab?.load(originalURL)
-            }
-            return .cancel
-        }
-
-        // Open non-HTTP(S) URLs (App Store, mailto, etc.) externally
-        if let url = navigationAction.request.url,
-           let scheme = url.scheme,
-           scheme != "http", scheme != "https",
-           scheme != "about", scheme != ErrorPage.scheme {
-            NSWorkspace.shared.open(url)
-            return .cancel
-        }
-
-        if navigationAction.shouldPerformDownload {
-            return .download
-        }
-
-        // Peek mode: intercept cross-host navigation on pinned tabs
-        // Only intercept on the pinned tab's own webView, not the peek webView
-        if let tab = selectedTab, tab.isPinned,
-           webView === tab.webView,
-           peekOverlayView == nil,
-           let url = navigationAction.request.url,
-           let pinnedHost = tab.pinnedURL?.host,
-           let targetHost = url.host,
-           targetHost != pinnedHost,
-           navigationAction.navigationType == .linkActivated {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let clickPoint = self.window.map {
-                    self.contentContainerView.convert($0.mouseLocationOutsideOfEventStream, from: nil)
-                }
-                self.showPeekOverlay(url: url, clickPoint: clickPoint)
-            }
-            return .cancel
-        }
-
-        return .allow
-    }
-
-    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
-        if !navigationResponse.canShowMIMEType {
-            return .download
-        }
-        if let response = navigationResponse.response as? HTTPURLResponse,
-           let disposition = response.value(forHTTPHeaderField: "Content-Disposition"),
-           disposition.lowercased().hasPrefix("attachment") {
-            return .download
-        }
-        return .allow
-    }
-
-    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
-        let sourceURL = navigationResponse.response.url
-        download.delegate = DownloadManager.shared
-        let item = DownloadManager.shared.handleNewDownload(download, sourceURL: sourceURL)
-        _ = item // suppress unused warning
-        triggerDownloadAnimation()
-    }
-
-    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
-        let sourceURL = navigationAction.request.url
-        download.delegate = DownloadManager.shared
-        let item = DownloadManager.shared.handleNewDownload(download, sourceURL: sourceURL)
-        _ = item
-        triggerDownloadAnimation()
-    }
-
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        if webView.url?.scheme == ErrorPage.scheme { return }
-        selectedTab?.didCommitNavigation()
-    }
-
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        let nsError = error as NSError
-        // WebKitErrorFrameLoadInterruptedByPolicyChange (102) fires when a navigation
-        // becomes a download — not a real failure, so don't show an error page.
-        if nsError.domain == "WebKitErrorDomain", nsError.code == 102 { return }
-        selectedTab?.didFailProvisionalNavigation(error: error)
-    }
-
-    private func triggerDownloadAnimation() {
-        guard let window = self.window else { return }
-        let contentBounds = contentContainerView.bounds
-        guard contentBounds.width > 0, contentBounds.height > 0 else { return }
-
-        let sourcePoint = contentContainerView.convert(
-            NSPoint(x: contentBounds.midX, y: contentBounds.midY), to: nil
-        )
-        guard sourcePoint.x.isFinite, sourcePoint.y.isFinite else { return }
-
-        let destPoint: NSPoint
-        if !sidebarItem.isCollapsed {
-            let buttonFrame = tabSidebar.downloadButton.convert(tabSidebar.downloadButton.bounds, to: nil)
-            guard buttonFrame.width > 0 else { return }
-            destPoint = NSPoint(x: buttonFrame.midX, y: buttonFrame.midY)
-        } else {
-            destPoint = NSPoint(x: 20, y: 20)
-        }
-
-        DownloadAnimation.animate(in: window, from: sourcePoint, to: destPoint)
-    }
-
-    func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
-                 completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        let method = challenge.protectionSpace.authenticationMethod
-        guard method == NSURLAuthenticationMethodHTTPBasic || method == NSURLAuthenticationMethodHTTPDigest else {
-            completionHandler(.performDefaultHandling, nil)
-            return
-        }
-
-        guard let window = self.window else {
-            completionHandler(.performDefaultHandling, nil)
-            return
-        }
-
-        let alert = NSAlert()
-        alert.messageText = "Log in to \(challenge.protectionSpace.host)"
-        if let realm = challenge.protectionSpace.realm, !realm.isEmpty {
-            alert.informativeText = realm
-        }
-        alert.addButton(withTitle: "Log In")
-        alert.addButton(withTitle: "Cancel")
-
-        let usernameField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
-        usernameField.placeholderString = "Username"
-
-        let passwordField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
-        passwordField.placeholderString = "Password"
-
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 56))
-        usernameField.frame = NSRect(x: 0, y: 32, width: 200, height: 24)
-        passwordField.frame = NSRect(x: 0, y: 0, width: 200, height: 24)
-        container.addSubview(usernameField)
-        container.addSubview(passwordField)
-        alert.accessoryView = container
-
-        alert.beginSheetModal(for: window) { response in
-            if response == .alertFirstButtonReturn {
-                let credential = URLCredential(user: usernameField.stringValue,
-                                               password: passwordField.stringValue,
-                                               persistence: .forSession)
-                completionHandler(.useCredential, credential)
-            } else {
-                completionHandler(.rejectProtectionSpace, nil)
-            }
         }
     }
 }
