@@ -222,6 +222,8 @@ class BrowserWindowController: NSWindowController {
         contentItem = NSSplitViewItem(viewController: contentVC)
         splitViewController.addSplitViewItem(contentItem)
 
+        splitViewController.splitView.autosaveName = "BrowserSplitView"
+
         sidebarCollapseObservation = sidebarItem.observe(\.isCollapsed, options: [.new]) { [weak self] _, change in
             guard let self, let collapsed = change.newValue else { return }
             if collapsed {
