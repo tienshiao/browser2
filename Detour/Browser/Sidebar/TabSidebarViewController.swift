@@ -77,6 +77,38 @@ private class DraggableBarView: NSView {
     override var mouseDownCanMoveWindow: Bool { true }
 }
 
+private class FadeShadowView: NSView {
+    init(flipped: Bool) {
+        super.init(frame: .zero)
+        let gradient = CAGradientLayer()
+        if flipped {
+            gradient.startPoint = CGPoint(x: 0.5, y: 1)
+            gradient.endPoint = CGPoint(x: 0.5, y: 0)
+        }
+        gradient.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        wantsLayer = true
+        layer?.addSublayer(gradient)
+        updateGradientColors()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateGradientColors()
+    }
+
+    private func updateGradientColors() {
+        guard let gradient = layer?.sublayers?.first as? CAGradientLayer else { return }
+        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let alpha: CGFloat = isDark ? 0.25 : 0.05
+        gradient.colors = [
+            NSColor.black.withAlphaComponent(alpha).cgColor,
+            CGColor.clear
+        ]
+    }
+}
+
 private let tabReorderPasteboardType = NSPasteboard.PasteboardType("com.mybrowser.tab-reorder")
 
 class TabSidebarViewController: NSViewController {
@@ -117,6 +149,8 @@ class TabSidebarViewController: NSViewController {
     private var pageTableViews: [DraggableTableView] = []
     private var pageSpaceIDs: [UUID] = []
     private var activePageIndex = 0
+    private var topFadeShadow: NSView!
+    private var bottomFadeShadow: NSView!
 
     var activeSpaceID: UUID? {
         didSet { updateActivePage() }
@@ -397,13 +431,62 @@ class TabSidebarViewController: NSViewController {
             bottomBar.heightAnchor.constraint(equalToConstant: 32),
         ])
 
+        // Scroll edge fade shadows
+        topFadeShadow = makeFadeShadow(flipped: true)
+        bottomFadeShadow = makeFadeShadow(flipped: false)
+        pageClipView.addSubview(topFadeShadow, positioned: .above, relativeTo: pageStripView)
+        pageClipView.addSubview(bottomFadeShadow, positioned: .above, relativeTo: pageStripView)
+
+        NSLayoutConstraint.activate([
+            topFadeShadow.topAnchor.constraint(equalTo: pageClipView.topAnchor),
+            topFadeShadow.leadingAnchor.constraint(equalTo: pageClipView.leadingAnchor),
+            topFadeShadow.trailingAnchor.constraint(equalTo: pageClipView.trailingAnchor),
+            topFadeShadow.heightAnchor.constraint(equalToConstant: 12),
+
+            bottomFadeShadow.bottomAnchor.constraint(equalTo: pageClipView.bottomAnchor),
+            bottomFadeShadow.leadingAnchor.constraint(equalTo: pageClipView.leadingAnchor),
+            bottomFadeShadow.trailingAnchor.constraint(equalTo: pageClipView.trailingAnchor),
+            bottomFadeShadow.heightAnchor.constraint(equalToConstant: 12),
+        ])
+
         container.allowedTouchTypes = .indirect
         self.view = container
+    }
+
+    private func makeFadeShadow(flipped: Bool) -> NSView {
+        let view = FadeShadowView(flipped: flipped)
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.alphaValue = 0
+        return view
+    }
+
+    private func updateFadeShadows() {
+        guard let clipView = scrollView.contentView as? NSClipView else { return }
+        guard let documentView = scrollView.documentView else { return }
+
+        let contentHeight = documentView.frame.height
+        let visibleHeight = clipView.bounds.height
+        let scrollY = clipView.bounds.origin.y
+
+        let showTop = scrollY > 0
+        let showBottom = contentHeight - visibleHeight - scrollY > 0.5
+
+        let targetTopAlpha: CGFloat = showTop ? 1 : 0
+        let targetBottomAlpha: CGFloat = showBottom ? 1 : 0
+
+        guard topFadeShadow.alphaValue != targetTopAlpha || bottomFadeShadow.alphaValue != targetBottomAlpha else { return }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            topFadeShadow.animator().alphaValue = targetTopAlpha
+            bottomFadeShadow.animator().alphaValue = targetBottomAlpha
+        }
     }
 
     override func viewDidLayout() {
         super.viewDidLayout()
         relayoutPages()
+        updateFadeShadows()
     }
 
     // MARK: - Page Management
@@ -506,6 +589,8 @@ class TabSidebarViewController: NSViewController {
         if pageW > 0 {
             pageStripView.frame.origin.x = -CGFloat(newIndex) * pageW
         }
+
+        updateFadeShadows()
     }
 
     @objc private func scrollViewDidScroll(_ notification: Notification) {
@@ -521,6 +606,10 @@ class TabSidebarViewController: NSViewController {
             } else if let newTabCell = cellView as? NewTabCellView {
                 newTabCell.recheckHover()
             }
+        }
+
+        if pageIndex == activePageIndex {
+            updateFadeShadows()
         }
     }
 
