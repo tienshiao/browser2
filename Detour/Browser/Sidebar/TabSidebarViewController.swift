@@ -1225,7 +1225,10 @@ extension TabSidebarViewController: NSMenuDelegate {
         menu.removeAllItems()
 
         let clickedRow = tableView.clickedRow
-        guard clickedRow >= 0 else { return }
+        guard clickedRow >= 0 else {
+            buildSpaceContextMenu(menu)
+            return
+        }
 
         let row = sidebarRow(for: clickedRow)
         let tabIndex: Int
@@ -1239,6 +1242,7 @@ extension TabSidebarViewController: NSMenuDelegate {
             tabIndex = index
             isPinned = false
         default:
+            buildSpaceContextMenu(menu)
             return
         }
 
@@ -1308,29 +1312,31 @@ extension TabSidebarViewController: NSMenuDelegate {
             menu.addItem(moveItem)
         }
 
-        menu.addItem(.separator())
+        if !isIncognito {
+            menu.addItem(.separator())
 
-        if isPinned {
-            let unpinItem = NSMenuItem(title: "Unpin Tab", action: #selector(contextMenuUnpinTab(_:)), keyEquivalent: "")
-            unpinItem.target = self
-            menu.addItem(unpinItem)
-        } else {
-            if tab.url != nil {
-                let pinItem = NSMenuItem(title: "Pin Tab", action: #selector(contextMenuPinTab(_:)), keyEquivalent: "")
-                pinItem.target = self
-                menu.addItem(pinItem)
+            if isPinned {
+                let unpinItem = NSMenuItem(title: "Unpin Tab", action: #selector(contextMenuUnpinTab(_:)), keyEquivalent: "")
+                unpinItem.target = self
+                menu.addItem(unpinItem)
+            } else {
+                if tab.url != nil {
+                    let pinItem = NSMenuItem(title: "Pin Tab", action: #selector(contextMenuPinTab(_:)), keyEquivalent: "")
+                    pinItem.target = self
+                    menu.addItem(pinItem)
+                }
+
+                let archiveItem = NSMenuItem(title: "Archive Tab", action: #selector(contextMenuArchiveTab(_:)), keyEquivalent: "")
+                archiveItem.target = self
+                menu.addItem(archiveItem)
+
+                let archiveBelowItem = NSMenuItem(title: "Archive Tabs Below", action: #selector(contextMenuArchiveTabsBelow(_:)), keyEquivalent: "")
+                archiveBelowItem.target = self
+                if tabIndex >= tabs.count - 1 {
+                    archiveBelowItem.isEnabled = false
+                }
+                menu.addItem(archiveBelowItem)
             }
-
-            let archiveItem = NSMenuItem(title: "Archive Tab", action: #selector(contextMenuArchiveTab(_:)), keyEquivalent: "")
-            archiveItem.target = self
-            menu.addItem(archiveItem)
-
-            let archiveBelowItem = NSMenuItem(title: "Archive Tabs Below", action: #selector(contextMenuArchiveTabsBelow(_:)), keyEquivalent: "")
-            archiveBelowItem.target = self
-            if tabIndex >= tabs.count - 1 {
-                archiveBelowItem.isEnabled = false
-            }
-            menu.addItem(archiveBelowItem)
         }
     }
 
@@ -1371,6 +1377,30 @@ extension TabSidebarViewController: NSMenuDelegate {
 
     @objc private func contextMenuArchiveTabsBelow(_ sender: NSMenuItem) {
         delegate?.tabSidebar(self, didRequestArchiveTabsBelowIndex: contextMenuTabIndex)
+    }
+
+    @objc private func contextMenuNewFolder(_ sender: NSMenuItem) {
+        // TODO: implement folder creation
+    }
+
+    private func buildSpaceContextMenu(_ menu: NSMenu) {
+        guard !isIncognito, activeSpaceID != nil else { return }
+
+        let editItem = NSMenuItem(title: "Edit Space…", action: #selector(editSpaceClicked(_:)), keyEquivalent: "")
+        editItem.target = self
+        editItem.tag = activePageIndex
+
+        let deleteItem = NSMenuItem(title: "Delete Space", action: #selector(deleteSpaceClicked(_:)), keyEquivalent: "")
+        deleteItem.target = self
+        deleteItem.tag = activePageIndex
+
+        menu.addItem(editItem)
+        menu.addItem(deleteItem)
+        menu.addItem(.separator())
+
+        let folderItem = NSMenuItem(title: "New Folder", action: #selector(contextMenuNewFolder(_:)), keyEquivalent: "")
+        folderItem.target = self
+        menu.addItem(folderItem)
     }
 }
 
