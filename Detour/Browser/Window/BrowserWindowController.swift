@@ -1281,6 +1281,10 @@ extension BrowserWindowController: TabStoreObserver {
     func tabStoreDidInsertTab(_ tab: BrowserTab, at index: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
         tabSidebar.insertTab(at: index, tabs: space.tabs)
+
+        if sidebarItem.isCollapsed {
+            toastManager.show(message: "Opened new tab in background")
+        }
     }
 
     func tabStoreDidRemoveTab(_ tab: BrowserTab, at index: Int, in space: Space) {
