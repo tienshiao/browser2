@@ -115,8 +115,7 @@ struct AppDatabase {
 
     func pushClosedTab(_ record: ClosedTabRecord) {
         performWrite("push closed tab") { db in
-            var r = record
-            try r.insert(db)
+            try record.insert(db)
             let count = try ClosedTabRecord.fetchCount(db)
             if count > Self.closedTabCap {
                 let excess = count - Self.closedTabCap

@@ -494,6 +494,7 @@ class TabStore {
 
     // MARK: - Tab Mutations
 
+    @discardableResult
     private func insertTab(_ tab: BrowserTab, in space: Space, parentID: UUID?) -> Int {
         tab.spaceID = space.id
         tab.parentID = parentID

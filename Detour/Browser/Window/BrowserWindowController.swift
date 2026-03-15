@@ -562,24 +562,16 @@ class BrowserWindowController: NSWindowController {
         removeContentViews()
 
         if let inspector = webView.value(forKey: "_inspector") as? NSObject {
-            inspector.perform(Selector(("close")))
+            inspector.perform(NSSelectorFromString("close"))
         }
 
         // Snapshot the webView at its current size (the old window's size) before stealing it.
-        // WKWebView.takeSnapshot is async, so we capture the window backing store synchronously.
         var priorSnapshot: NSImage?
-        if let oldWindow = webView.window {
-            let rectInWindow = webView.convert(webView.bounds, to: nil)
-            let backingRect = oldWindow.convertToScreen(rectInWindow)
-            let screenRect = CGRect(
-                x: backingRect.origin.x,
-                y: NSScreen.screens.first.map { $0.frame.maxY - backingRect.maxY } ?? backingRect.origin.y,
-                width: backingRect.width,
-                height: backingRect.height
-            )
-            if let cgImage = CGWindowListCreateImage(screenRect, .optionIncludingWindow, CGWindowID(oldWindow.windowNumber), [.boundsIgnoreFraming]) {
-                priorSnapshot = NSImage(cgImage: cgImage, size: webView.bounds.size)
-            }
+        if let bitmap = webView.bitmapImageRepForCachingDisplay(in: webView.bounds) {
+            webView.cacheDisplay(in: webView.bounds, to: bitmap)
+            let image = NSImage(size: webView.bounds.size)
+            image.addRepresentation(bitmap)
+            priorSnapshot = image
         }
         let tabID = tab.id
 

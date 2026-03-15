@@ -6,6 +6,12 @@ class BrowserTab: NSObject {
     let id: UUID
     private(set) var webView: WKWebView?
 
+    private static func unarchiveInteractionState(_ data: Data) -> Any? {
+        guard let unarchiver = try? NSKeyedUnarchiver(forReadingFrom: data) else { return nil }
+        unarchiver.requiresSecureCoding = false
+        return unarchiver.decodeObject(forKey: NSKeyedArchiveRootObjectKey)
+    }
+
     @Published var title: String = "New Tab"
     @Published var url: URL?
     @Published var isLoading: Bool = false
@@ -124,7 +130,7 @@ class BrowserTab: NSObject {
         }
         self.url = fallbackURL
         if let archivedInteractionState,
-           let state = try? NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(archivedInteractionState) {
+           let state = Self.unarchiveInteractionState(archivedInteractionState) {
             webView?.interactionState = state
         } else if let fallbackURL {
             load(fallbackURL)
@@ -321,7 +327,7 @@ class BrowserTab: NSObject {
         setupObservers()
 
         if let cachedInteractionState,
-           let state = try? NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(cachedInteractionState) {
+           let state = Self.unarchiveInteractionState(cachedInteractionState) {
             newWebView.interactionState = state
         } else if let url {
             newWebView.load(URLRequest(url: url))

@@ -404,7 +404,7 @@ class TabSidebarViewController: NSViewController {
     }
 
     private func updateFadeShadows() {
-        guard let clipView = scrollView.contentView as? NSClipView else { return }
+        let clipView = scrollView.contentView
         guard let documentView = scrollView.documentView else { return }
 
         let contentHeight = documentView.frame.height
@@ -1268,17 +1268,8 @@ extension TabSidebarViewController: NSMenuDelegate {
 
         // Share submenu
         if let url = tab.url {
-            let shareItem = NSMenuItem(title: "Share", action: nil, keyEquivalent: "")
-            let shareMenu = NSMenu()
-            for service in NSSharingService.sharingServices(forItems: [url]) {
-                let serviceItem = NSMenuItem(title: service.title, action: #selector(contextMenuShare(_:)), keyEquivalent: "")
-                serviceItem.target = self
-                serviceItem.representedObject = service
-                serviceItem.image = service.image
-                shareMenu.addItem(serviceItem)
-            }
-            shareItem.submenu = shareMenu
-            menu.addItem(shareItem)
+            let picker = NSSharingServicePicker(items: [url])
+            menu.addItem(picker.standardShareMenuItem)
         }
 
         menu.addItem(.separator())
@@ -1345,13 +1336,6 @@ extension TabSidebarViewController: NSMenuDelegate {
         guard let url = tab.url else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url.absoluteString, forType: .string)
-    }
-
-    @objc private func contextMenuShare(_ sender: NSMenuItem) {
-        guard let service = sender.representedObject as? NSSharingService else { return }
-        let tab = contextMenuTabIsPinned ? pinnedTabs[contextMenuTabIndex] : tabs[contextMenuTabIndex]
-        guard let url = tab.url else { return }
-        service.perform(withItems: [url])
     }
 
     @objc private func contextMenuDuplicate(_ sender: NSMenuItem) {
