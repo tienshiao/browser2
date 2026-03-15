@@ -419,7 +419,10 @@ class TabSidebarViewController: NSViewController {
         pageSpaceIDs = newIDs
 
         // Tear down old pages
-        for sv in pageScrollViews { sv.removeFromSuperview() }
+        for sv in pageScrollViews {
+            NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: sv.contentView)
+            sv.removeFromSuperview()
+        }
         pageScrollViews.removeAll()
         pageTableViews.removeAll()
 
@@ -451,6 +454,17 @@ class TabSidebarViewController: NSViewController {
 
         relayoutPages()
         updateActivePage()
+
+        // Observe scroll (clip view bounds changes) to fix hover state on scroll
+        for sv in pageScrollViews {
+            sv.contentView.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(scrollViewDidScroll(_:)),
+                name: NSView.boundsDidChangeNotification,
+                object: sv.contentView
+            )
+        }
 
         // Reload all non-active pages from TabStore
         for (i, tv) in pageTableViews.enumerated() where i != activePageIndex {
@@ -491,6 +505,22 @@ class TabSidebarViewController: NSViewController {
         let pageW = pageClipView.bounds.width
         if pageW > 0 {
             pageStripView.frame.origin.x = -CGFloat(newIndex) * pageW
+        }
+    }
+
+    @objc private func scrollViewDidScroll(_ notification: Notification) {
+        guard let clipView = notification.object as? NSClipView,
+              let scrollView = clipView.enclosingScrollView as? DraggableScrollView,
+              let pageIndex = pageScrollViews.firstIndex(of: scrollView) else { return }
+        let tv = pageTableViews[pageIndex]
+        let visibleRows = tv.rows(in: tv.visibleRect)
+        for row in visibleRows.lowerBound..<visibleRows.upperBound {
+            guard let cellView = tv.view(atColumn: 0, row: row, makeIfNecessary: false) else { continue }
+            if let tabCell = cellView as? TabCellView {
+                tabCell.recheckHover()
+            } else if let newTabCell = cellView as? NewTabCellView {
+                newTabCell.recheckHover()
+            }
         }
     }
 

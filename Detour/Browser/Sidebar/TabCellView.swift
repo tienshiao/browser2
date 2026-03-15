@@ -196,6 +196,28 @@ class TabCellView: NSTableCellView {
         updateLayoutState()
     }
 
+    /// Re-evaluate hover state using the current mouse position.
+    /// Call this when scrolling moves cells under/away from the mouse,
+    /// since NSTrackingArea doesn't reliably fire mouseExited in that case.
+    func recheckHover() {
+        guard let window else { return }
+        let mouseInWindow = window.mouseLocationOutsideOfEventStream
+        let mouseInSelf = convert(mouseInWindow, from: nil)
+        let shouldHover = bounds.contains(mouseInSelf)
+        guard shouldHover != isHovered else { return }
+        if shouldHover {
+            isHovered = true
+            closeButton.isHidden = false
+            hoverBackground.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+            hoverBackground.isHidden = false
+        } else {
+            isHovered = false
+            closeButton.isHidden = true
+            hoverBackground.isHidden = true
+        }
+        updateLayoutState()
+    }
+
     func updateAudio(isPlaying: Bool, isMuted: Bool) {
         audioPlaying = isPlaying || isMuted
 
@@ -483,6 +505,19 @@ class NewTabCellView: NSTableCellView {
 
     override func mouseExited(with event: NSEvent) {
         hoverBackground.isHidden = true
+    }
+
+    func recheckHover() {
+        guard let window else { return }
+        let mouseInWindow = window.mouseLocationOutsideOfEventStream
+        let mouseInSelf = convert(mouseInWindow, from: nil)
+        let shouldHover = bounds.contains(mouseInSelf)
+        if shouldHover {
+            hoverBackground.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+            hoverBackground.isHidden = false
+        } else {
+            hoverBackground.isHidden = true
+        }
     }
 
     required init?(coder: NSCoder) { fatalError() }
