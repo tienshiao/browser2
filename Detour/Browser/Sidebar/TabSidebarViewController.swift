@@ -20,6 +20,13 @@ protocol TabSidebarDelegate: AnyObject {
     func tabSidebarDidRequestEditSpace(_ sidebar: TabSidebarViewController, spaceID: UUID, sourceButton: NSButton)
     func tabSidebarDidRequestDeleteSpace(_ sidebar: TabSidebarViewController, spaceID: UUID)
     func tabSidebarDidRequestShowDownloads(_ sidebar: TabSidebarViewController, sourceButton: NSButton)
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestDuplicateTabAt index: Int, isPinned: Bool)
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestMoveTabAt index: Int, isPinned: Bool, toSpaceID: UUID)
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestArchiveTabAt index: Int)
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestArchiveTabsBelowIndex index: Int)
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestPinTabAt index: Int)
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestUnpinTabAt index: Int)
+    func tabSidebarSpacesForContextMenu(_ sidebar: TabSidebarViewController) -> [(id: UUID, name: String, emoji: String, isCurrent: Bool)]
 }
 
 extension TabSidebarDelegate {
@@ -29,6 +36,13 @@ extension TabSidebarDelegate {
     func tabSidebar(_ sidebar: TabSidebarViewController, didMovePinnedTabFrom sourceIndex: Int, to destinationIndex: Int) {}
     func tabSidebar(_ sidebar: TabSidebarViewController, didDragTabToPinAt index: Int, destinationIndex: Int) {}
     func tabSidebar(_ sidebar: TabSidebarViewController, didDragPinnedTabToUnpinAt index: Int, destinationIndex: Int) {}
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestDuplicateTabAt index: Int, isPinned: Bool) {}
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestMoveTabAt index: Int, isPinned: Bool, toSpaceID: UUID) {}
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestArchiveTabAt index: Int) {}
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestArchiveTabsBelowIndex index: Int) {}
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestPinTabAt index: Int) {}
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestUnpinTabAt index: Int) {}
+    func tabSidebarSpacesForContextMenu(_ sidebar: TabSidebarViewController) -> [(id: UUID, name: String, emoji: String, isCurrent: Bool)] { [] }
 }
 
 private let tabReorderPasteboardType = NSPasteboard.PasteboardType("com.mybrowser.tab-reorder")
@@ -46,6 +60,9 @@ class TabSidebarViewController: NSViewController {
     private(set) var forwardButton = HoverButton()
     private(set) var reloadButton = HoverButton()
     private(set) var sidebarToggleButton = HoverButton()
+
+    private var contextMenuTabIndex: Int = -1
+    private var contextMenuTabIsPinned: Bool = false
 
     private(set) var downloadButton = HoverButton()
     private lazy var downloadBadge: NSView = {
@@ -447,6 +464,10 @@ class TabSidebarViewController: NSViewController {
             tv.delegate = self
             tv.registerForDraggedTypes([tabReorderPasteboardType])
             tv.draggingDestinationFeedbackStyle = .sourceList
+
+            let menu = NSMenu()
+            menu.delegate = self
+            tv.menu = menu
 
             let sv = DraggableScrollView()
             sv.contentView = DraggableClipView()
@@ -1194,6 +1215,162 @@ extension TabSidebarViewController: NSTableViewDelegate {
         case .topSpacer, .separator:
             break
         }
+    }
+}
+
+// MARK: - Context Menu
+
+extension TabSidebarViewController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+
+        let clickedRow = tableView.clickedRow
+        guard clickedRow >= 0 else { return }
+
+        let row = sidebarRow(for: clickedRow)
+        let tabIndex: Int
+        let isPinned: Bool
+
+        switch row {
+        case .pinnedTab(let index):
+            tabIndex = index
+            isPinned = true
+        case .normalTab(let index):
+            tabIndex = index
+            isPinned = false
+        default:
+            return
+        }
+
+        contextMenuTabIndex = tabIndex
+        contextMenuTabIsPinned = isPinned
+
+        let tab = isPinned ? pinnedTabs[tabIndex] : tabs[tabIndex]
+        let isSelectedTab = clickedRow == tableView.selectedRow
+
+        // Copy URL / Copy Link
+        if tab.url != nil {
+            let copyItem = NSMenuItem(
+                title: isSelectedTab ? "Copy URL" : "Copy Link",
+                action: #selector(contextMenuCopyURL(_:)),
+                keyEquivalent: isSelectedTab ? "C" : ""
+            )
+            if isSelectedTab {
+                copyItem.keyEquivalentModifierMask = [.command, .shift]
+            }
+            copyItem.target = self
+            menu.addItem(copyItem)
+        }
+
+        // Share submenu
+        if let url = tab.url {
+            let shareItem = NSMenuItem(title: "Share", action: nil, keyEquivalent: "")
+            let shareMenu = NSMenu()
+            for service in NSSharingService.sharingServices(forItems: [url]) {
+                let serviceItem = NSMenuItem(title: service.title, action: #selector(contextMenuShare(_:)), keyEquivalent: "")
+                serviceItem.target = self
+                serviceItem.representedObject = service
+                serviceItem.image = service.image
+                shareMenu.addItem(serviceItem)
+            }
+            shareItem.submenu = shareMenu
+            menu.addItem(shareItem)
+        }
+
+        menu.addItem(.separator())
+
+        // Duplicate
+        if tab.url != nil {
+            let dupItem = NSMenuItem(title: "Duplicate", action: #selector(contextMenuDuplicate(_:)), keyEquivalent: "")
+            dupItem.target = self
+            menu.addItem(dupItem)
+        }
+
+        // Move to Space submenu
+        let spaces = delegate?.tabSidebarSpacesForContextMenu(self) ?? []
+        if spaces.count > 1 {
+            let moveItem = NSMenuItem(title: "Move to", action: nil, keyEquivalent: "")
+            let moveMenu = NSMenu()
+            for space in spaces {
+                let spaceItem = NSMenuItem(
+                    title: "\(space.emoji) \(space.name)",
+                    action: #selector(contextMenuMoveToSpace(_:)),
+                    keyEquivalent: ""
+                )
+                spaceItem.target = self
+                spaceItem.representedObject = space.id
+                if space.isCurrent {
+                    spaceItem.state = .on
+                }
+                moveMenu.addItem(spaceItem)
+            }
+            moveItem.submenu = moveMenu
+            menu.addItem(moveItem)
+        }
+
+        menu.addItem(.separator())
+
+        if isPinned {
+            let unpinItem = NSMenuItem(title: "Unpin Tab", action: #selector(contextMenuUnpinTab(_:)), keyEquivalent: "")
+            unpinItem.target = self
+            menu.addItem(unpinItem)
+        } else {
+            if tab.url != nil {
+                let pinItem = NSMenuItem(title: "Pin Tab", action: #selector(contextMenuPinTab(_:)), keyEquivalent: "")
+                pinItem.target = self
+                menu.addItem(pinItem)
+            }
+
+            let archiveItem = NSMenuItem(title: "Archive Tab", action: #selector(contextMenuArchiveTab(_:)), keyEquivalent: "")
+            archiveItem.target = self
+            menu.addItem(archiveItem)
+
+            let archiveBelowItem = NSMenuItem(title: "Archive Tabs Below", action: #selector(contextMenuArchiveTabsBelow(_:)), keyEquivalent: "")
+            archiveBelowItem.target = self
+            if tabIndex >= tabs.count - 1 {
+                archiveBelowItem.isEnabled = false
+            }
+            menu.addItem(archiveBelowItem)
+        }
+    }
+
+    @objc private func contextMenuCopyURL(_ sender: NSMenuItem) {
+        let tab = contextMenuTabIsPinned ? pinnedTabs[contextMenuTabIndex] : tabs[contextMenuTabIndex]
+        guard let url = tab.url else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+    }
+
+    @objc private func contextMenuShare(_ sender: NSMenuItem) {
+        guard let service = sender.representedObject as? NSSharingService else { return }
+        let tab = contextMenuTabIsPinned ? pinnedTabs[contextMenuTabIndex] : tabs[contextMenuTabIndex]
+        guard let url = tab.url else { return }
+        service.perform(withItems: [url])
+    }
+
+    @objc private func contextMenuDuplicate(_ sender: NSMenuItem) {
+        delegate?.tabSidebar(self, didRequestDuplicateTabAt: contextMenuTabIndex, isPinned: contextMenuTabIsPinned)
+    }
+
+    @objc private func contextMenuMoveToSpace(_ sender: NSMenuItem) {
+        guard let spaceID = sender.representedObject as? UUID else { return }
+        delegate?.tabSidebar(self, didRequestMoveTabAt: contextMenuTabIndex, isPinned: contextMenuTabIsPinned, toSpaceID: spaceID)
+    }
+
+    @objc private func contextMenuPinTab(_ sender: NSMenuItem) {
+        delegate?.tabSidebar(self, didRequestPinTabAt: contextMenuTabIndex)
+    }
+
+    @objc private func contextMenuUnpinTab(_ sender: NSMenuItem) {
+        delegate?.tabSidebar(self, didRequestUnpinTabAt: contextMenuTabIndex)
+    }
+
+    @objc private func contextMenuArchiveTab(_ sender: NSMenuItem) {
+        delegate?.tabSidebar(self, didRequestArchiveTabAt: contextMenuTabIndex)
+    }
+
+    @objc private func contextMenuArchiveTabsBelow(_ sender: NSMenuItem) {
+        delegate?.tabSidebar(self, didRequestArchiveTabsBelowIndex: contextMenuTabIndex)
     }
 }
 

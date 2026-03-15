@@ -101,6 +101,74 @@ extension BrowserWindowController: TabSidebarDelegate {
         popover.show(relativeTo: sourceButton.bounds, of: sourceButton, preferredEdge: .minY)
     }
 
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestDuplicateTabAt index: Int, isPinned: Bool) {
+        guard let space = activeSpace else { return }
+        let tabs = isPinned ? space.pinnedTabs : space.tabs
+        guard index >= 0, index < tabs.count, let url = tabs[index].url else { return }
+        let newTab = store.addTab(in: space, url: url)
+        selectTab(id: newTab.id)
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestMoveTabAt index: Int, isPinned: Bool, toSpaceID: UUID) {
+        guard let srcSpace = activeSpace, let dstSpace = store.space(withID: toSpaceID) else { return }
+        let tabs = isPinned ? srcSpace.pinnedTabs : srcSpace.tabs
+        guard index >= 0, index < tabs.count else { return }
+        let tab = tabs[index]
+        guard let url = tab.url else { return }
+        if isPinned {
+            store.closePinnedTab(id: tab.id, in: srcSpace)
+        } else {
+            let wasSelected = tab.id == selectedTabID
+            if wasSelected {
+                closeTab(at: index, wasSelected: true)
+            } else {
+                store.closeTab(id: tab.id, in: srcSpace)
+            }
+        }
+        store.addTab(in: dstSpace, url: url)
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestArchiveTabAt index: Int) {
+        guard let space = activeSpace, index >= 0, index < space.tabs.count else { return }
+        let tab = space.tabs[index]
+        if tab.id == selectedTabID {
+            closeTab(at: index, wasSelected: true)
+        } else {
+            store.closeTab(id: tab.id, in: space)
+        }
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestArchiveTabsBelowIndex index: Int) {
+        guard let space = activeSpace else { return }
+        let tabs = space.tabs
+        for i in stride(from: tabs.count - 1, through: index + 1, by: -1) {
+            let tab = tabs[i]
+            if tab.id == selectedTabID {
+                closeTab(at: i, wasSelected: true)
+            } else {
+                store.closeTab(id: tab.id, in: space)
+            }
+        }
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestPinTabAt index: Int) {
+        guard let space = activeSpace, index >= 0, index < space.tabs.count else { return }
+        let tab = space.tabs[index]
+        guard tab.url != nil else { return }
+        store.pinTab(id: tab.id, in: space)
+    }
+
+    func tabSidebar(_ sidebar: TabSidebarViewController, didRequestUnpinTabAt index: Int) {
+        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
+        store.unpinTab(id: space.pinnedTabs[index].id, in: space)
+    }
+
+    func tabSidebarSpacesForContextMenu(_ sidebar: TabSidebarViewController) -> [(id: UUID, name: String, emoji: String, isCurrent: Bool)] {
+        store.spaces.filter { !$0.isIncognito }.map {
+            (id: $0.id, name: $0.name, emoji: $0.emoji, isCurrent: $0.id == activeSpaceID)
+        }
+    }
+
     func tabSidebarDidRequestDeleteSpace(_ sidebar: TabSidebarViewController, spaceID: UUID) {
         guard let space = store.space(withID: spaceID) else { return }
 
