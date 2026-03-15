@@ -44,7 +44,7 @@ class ToastManager {
 
 class ToastView: NSView {
     fileprivate let label = NSTextField(labelWithString: "")
-    private var effectView: NSVisualEffectView!
+    private var effectView: NSVisualEffectView?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -54,44 +54,83 @@ class ToastView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setup() {
-        effectView = NSVisualEffectView()
-        effectView.material = .hudWindow
-        effectView.blendingMode = .withinWindow
-        effectView.state = .active
-        effectView.wantsLayer = true
-        effectView.layer?.masksToBounds = true
-        effectView.layer?.borderWidth = 0.5
-        effectView.layer?.borderColor = NSColor.separatorColor.cgColor
-        effectView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(effectView)
-
-        wantsLayer = true
-        shadow = NSShadow()
-        shadow?.shadowColor = NSColor.black.withAlphaComponent(0.25)
-        shadow?.shadowOffset = NSSize(width: 0, height: -2)
-        shadow?.shadowBlurRadius = 8
-
         label.font = .boldSystemFont(ofSize: 13)
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
-        effectView.addSubview(label)
 
         translatesAutoresizingMaskIntoConstraints = false
 
+        let container: NSView
+
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView()
+            glass.cornerRadius = .infinity
+            glass.translatesAutoresizingMaskIntoConstraints = false
+            let paddingView = NSView()
+            paddingView.translatesAutoresizingMaskIntoConstraints = false
+            paddingView.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.topAnchor.constraint(equalTo: paddingView.topAnchor, constant: 10),
+                label.bottomAnchor.constraint(equalTo: paddingView.bottomAnchor, constant: -10),
+                label.leadingAnchor.constraint(equalTo: paddingView.leadingAnchor, constant: 14),
+                label.trailingAnchor.constraint(equalTo: paddingView.trailingAnchor, constant: -14),
+            ])
+            glass.contentView = paddingView
+            addSubview(glass)
+            container = glass
+        } else {
+            let shadowContainer = NSView()
+            shadowContainer.wantsLayer = true
+            shadowContainer.shadow = NSShadow()
+            shadowContainer.layer?.shadowColor = NSColor.black.cgColor
+            shadowContainer.layer?.shadowOpacity = 0.5
+            shadowContainer.layer?.shadowOffset = CGSize(width: 0, height: -2)
+            shadowContainer.layer?.shadowRadius = 20
+            shadowContainer.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(shadowContainer)
+
+            let ev = NSVisualEffectView()
+            ev.material = .hudWindow
+            ev.blendingMode = .withinWindow
+            ev.state = .active
+            ev.wantsLayer = true
+            ev.layer?.masksToBounds = true
+            ev.layer?.borderWidth = 0.5
+            ev.layer?.borderColor = NSColor.separatorColor.cgColor
+            ev.translatesAutoresizingMaskIntoConstraints = false
+            shadowContainer.addSubview(ev)
+            ev.addSubview(label)
+            self.effectView = ev
+
+            NSLayoutConstraint.activate([
+                shadowContainer.topAnchor.constraint(equalTo: topAnchor),
+                shadowContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+                shadowContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+                shadowContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+                ev.topAnchor.constraint(equalTo: shadowContainer.topAnchor),
+                ev.bottomAnchor.constraint(equalTo: shadowContainer.bottomAnchor),
+                ev.leadingAnchor.constraint(equalTo: shadowContainer.leadingAnchor),
+                ev.trailingAnchor.constraint(equalTo: shadowContainer.trailingAnchor),
+
+                label.topAnchor.constraint(equalTo: ev.topAnchor, constant: 10),
+                label.bottomAnchor.constraint(equalTo: ev.bottomAnchor, constant: -10),
+                label.leadingAnchor.constraint(equalTo: ev.leadingAnchor, constant: 14),
+                label.trailingAnchor.constraint(equalTo: ev.trailingAnchor, constant: -14),
+            ])
+            return
+        }
+
         NSLayoutConstraint.activate([
-            effectView.topAnchor.constraint(equalTo: topAnchor),
-            effectView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            effectView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            effectView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            label.topAnchor.constraint(equalTo: effectView.topAnchor, constant: 10),
-            label.bottomAnchor.constraint(equalTo: effectView.bottomAnchor, constant: -10),
-            label.leadingAnchor.constraint(equalTo: effectView.leadingAnchor, constant: 14),
-            label.trailingAnchor.constraint(equalTo: effectView.trailingAnchor, constant: -14),
+            container.topAnchor.constraint(equalTo: topAnchor),
+            container.bottomAnchor.constraint(equalTo: bottomAnchor),
+            container.leadingAnchor.constraint(equalTo: leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
     }
 
     override func layout() {
         super.layout()
-        effectView.layer?.cornerRadius = bounds.height / 2
+        effectView?.layer?.cornerRadius = bounds.height / 2
     }
 }

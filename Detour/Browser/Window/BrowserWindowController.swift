@@ -27,7 +27,6 @@ class BrowserWindowController: NSWindowController {
     private let dragHandle = WindowDragView()
     private let linkStatusBar = LinkStatusBar()
     let toastManager = ToastManager()
-    private var findBarTopConstraint: NSLayoutConstraint?
     private var webViewTopConstraint: NSLayoutConstraint?
     private var findMatchCount = 0
     private var findMatchIndex = 0
@@ -352,14 +351,11 @@ class BrowserWindowController: NSWindowController {
     private func setupFindBar() {
         findBar.delegate = self
         findBar.isHidden = true
-        findBar.translatesAutoresizingMaskIntoConstraints = false
         contentContainerView.addSubview(findBar)
 
-        findBarTopConstraint = findBar.topAnchor.constraint(equalTo: contentContainerView.topAnchor)
         NSLayoutConstraint.activate([
-            findBarTopConstraint!,
-            findBar.leadingAnchor.constraint(equalTo: contentContainerView.leadingAnchor),
-            findBar.trailingAnchor.constraint(equalTo: contentContainerView.trailingAnchor),
+            findBar.topAnchor.constraint(equalTo: contentContainerView.topAnchor, constant: 12),
+            findBar.leadingAnchor.constraint(equalTo: contentContainerView.leadingAnchor, constant: 12),
         ])
     }
 
@@ -378,8 +374,12 @@ class BrowserWindowController: NSWindowController {
     // MARK: - Find Bar Actions
 
     @objc func showFindBar(_ sender: Any?) {
+        findBar.alphaValue = 0
         findBar.isHidden = false
-        updateWebViewTopConstraint()
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.2
+            findBar.animator().alphaValue = 1
+        }
         findBar.focus()
     }
 
@@ -398,14 +398,18 @@ class BrowserWindowController: NSWindowController {
     }
 
     @objc func dismissFindBar(_ sender: Any?) {
-        findBar.isHidden = true
         findBar.searchField.stringValue = ""
         findBar.updateResultLabel("")
         lastFindQuery = ""
         findMatchCount = 0
         findMatchIndex = 0
-        updateWebViewTopConstraint()
         window?.makeFirstResponder(selectedTab?.webView)
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.15
+            findBar.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            self?.findBar.isHidden = true
+        })
     }
 
     private func performFind(_ text: String, backwards: Bool) {
@@ -474,26 +478,6 @@ class BrowserWindowController: NSWindowController {
         }
     }
 
-    private func updateWebViewTopConstraint() {
-        // We use frame-based layout instead of constraints for WKWebView because
-        // Auto Layout constraints break Web Inspector (inspector window fails to attach).
-        let topOffset: CGFloat = findBar.isHidden ? 0 : findBar.frame.height
-        let bounds = contentContainerView.bounds
-
-        for subview in contentContainerView.subviews where subview !== findBar && subview !== dragHandle && !(subview is PeekOverlayView) {
-            if subview is WKWebView {
-                subview.frame = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height - topOffset)
-            } else if subview is NSImageView {
-                webViewTopConstraint?.isActive = false
-                if findBar.isHidden {
-                    webViewTopConstraint = subview.topAnchor.constraint(equalTo: contentContainerView.topAnchor)
-                } else {
-                    webViewTopConstraint = subview.topAnchor.constraint(equalTo: findBar.bottomAnchor)
-                }
-                webViewTopConstraint?.isActive = true
-            }
-        }
-    }
 
     // MARK: - Tab Selection & WebView Ownership
 
@@ -611,9 +595,8 @@ class BrowserWindowController: NSWindowController {
         webView.autoresizingMask = [.width, .height]
         contentContainerView.addSubview(webView, positioned: .below, relativeTo: dragHandle)
 
-        let topOffset: CGFloat = findBar.isHidden ? 0 : findBar.frame.height
         let bounds = contentContainerView.bounds
-        webView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height - topOffset)
+        webView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height)
 
         ownsWebView = true
         contentContainerView.addSubview(linkStatusBar, positioned: .above, relativeTo: webView)
@@ -639,8 +622,7 @@ class BrowserWindowController: NSWindowController {
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentContainerView.addSubview(imageView, positioned: .below, relativeTo: dragHandle)
 
-        let topAnchor = findBar.isHidden ? contentContainerView.topAnchor : findBar.bottomAnchor
-        webViewTopConstraint = imageView.topAnchor.constraint(equalTo: topAnchor)
+        webViewTopConstraint = imageView.topAnchor.constraint(equalTo: contentContainerView.topAnchor)
         NSLayoutConstraint.activate([
             webViewTopConstraint!,
             imageView.bottomAnchor.constraint(equalTo: contentContainerView.bottomAnchor),
@@ -1043,7 +1025,6 @@ class BrowserWindowController: NSWindowController {
         self.peekWebView = nil
 
         // Animate webview constraints from peek insets to full content area
-        let topOffset: CGFloat = findBar.isHidden ? 0 : findBar.frame.height
 
         // Animate corner radius with matching timing
         if let layer = webView.layer {
@@ -1060,7 +1041,7 @@ class BrowserWindowController: NSWindowController {
         NSAnimationContext.runAnimationGroup({ [weak self] context in
             context.duration = 0.6
             context.timingFunction = CAMediaTimingFunction(controlPoints: 0.175, 0.885, 0.32, 1.1)
-            self?.peekWebViewTopConstraint?.animator().constant = topOffset
+            self?.peekWebViewTopConstraint?.animator().constant = 0
             self?.peekWebViewBottomConstraint?.animator().constant = 0
             self?.peekWebViewLeadingConstraint?.animator().constant = 0
             self?.peekWebViewTrailingConstraint?.animator().constant = 0

@@ -3,6 +3,7 @@ import AppKit
 class HoverButton: NSButton {
     private var trackingArea: NSTrackingArea?
     private let hoverBackground = NSView()
+    var circular: Bool = false { didSet { needsLayout = true } }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -16,8 +17,21 @@ class HoverButton: NSButton {
 
     override func layout() {
         super.layout()
-        // Match the source list selection inset: 10pt from each side of the full sidebar width
-        hoverBackground.frame = bounds.insetBy(dx: 10, dy: 1)
+        if circular {
+            let padding: CGFloat = 3
+            let side = min(bounds.width, bounds.height) + padding
+            hoverBackground.frame = CGRect(
+                x: (bounds.width - side) / 2,
+                y: (bounds.height - side) / 2,
+                width: side,
+                height: side
+            )
+            hoverBackground.layer?.cornerRadius = side / 2
+        } else {
+            // Match the source list selection inset: 10pt from each side of the full sidebar width
+            hoverBackground.frame = bounds.insetBy(dx: 10, dy: 1)
+            hoverBackground.layer?.cornerRadius = 6
+        }
     }
 
     override func updateTrackingAreas() {

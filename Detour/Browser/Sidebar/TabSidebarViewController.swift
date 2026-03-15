@@ -88,12 +88,12 @@ class TabSidebarViewController: NSViewController {
     private var scrollView = DraggableScrollView()
 
     private(set) var fauxAddressBar = FauxAddressBar()
-    private(set) var backButton = NSButton()
-    private(set) var forwardButton = NSButton()
-    private(set) var reloadButton = NSButton()
-    private(set) var sidebarToggleButton = NSButton()
+    private(set) var backButton = HoverButton()
+    private(set) var forwardButton = HoverButton()
+    private(set) var reloadButton = HoverButton()
+    private(set) var sidebarToggleButton = HoverButton()
 
-    private(set) var downloadButton = NSButton()
+    private(set) var downloadButton = HoverButton()
     private lazy var downloadBadge: NSView = {
         let badge = NSView()
         badge.wantsLayer = true
@@ -107,7 +107,7 @@ class TabSidebarViewController: NSViewController {
     private var suppressReload = false
     private var bottomBar = DraggableBarView()
     private var spaceButtonsContainer = NSStackView()
-    private var addSpaceButton = NSButton()
+    private var addSpaceButton = HoverButton()
     private var isAnimatingSwipe = false
 
     // Page strip: all spaces laid out side-by-side, clipped by pageClipView
@@ -307,11 +307,13 @@ class TabSidebarViewController: NSViewController {
         bottomBar.addSubview(spaceButtonsContainer)
 
         // Add space button
-        addSpaceButton = NSButton()
-        addSpaceButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Space")
+        let boldConfig = NSImage.SymbolConfiguration(pointSize: 14, weight: .bold)
+        addSpaceButton = HoverButton()
+        addSpaceButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Space")?.withSymbolConfiguration(boldConfig)
         addSpaceButton.bezelStyle = .inline
         addSpaceButton.isBordered = false
         addSpaceButton.imagePosition = .imageOnly
+        addSpaceButton.circular = true
         addSpaceButton.target = self
         addSpaceButton.action = #selector(addSpaceClicked)
         addSpaceButton.translatesAutoresizingMaskIntoConstraints = false
@@ -319,11 +321,12 @@ class TabSidebarViewController: NSViewController {
         bottomBar.addSubview(addSpaceButton)
 
         // Download button
-        downloadButton = NSButton()
-        downloadButton.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: "Downloads")
+        downloadButton = HoverButton()
+        downloadButton.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: "Downloads")?.withSymbolConfiguration(boldConfig)
         downloadButton.bezelStyle = .inline
         downloadButton.isBordered = false
         downloadButton.imagePosition = .imageOnly
+        downloadButton.circular = true
         downloadButton.target = self
         downloadButton.action = #selector(downloadButtonClicked)
         downloadButton.translatesAutoresizingMaskIntoConstraints = false
@@ -366,11 +369,11 @@ class TabSidebarViewController: NSViewController {
 
         NSLayoutConstraint.activate([
             // Sidebar toggle button: in title bar area, right of traffic lights
-            sidebarToggleButton.topAnchor.constraint(equalTo: container.topAnchor, constant: 7),
+            sidebarToggleButton.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
             sidebarToggleButton.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 74),
 
             // Nav buttons: pinned to top of view (title bar area), right-aligned
-            navStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 7),
+            navStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
             navStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
             navStack.heightAnchor.constraint(equalToConstant: 24),
 
@@ -544,12 +547,14 @@ class TabSidebarViewController: NSViewController {
         rebuildPages()
     }
 
-    private func makeNavButton(symbolName: String, accessibilityLabel: String, action: Selector) -> NSButton {
-        let button = NSButton()
-        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibilityLabel)
+    private func makeNavButton(symbolName: String, accessibilityLabel: String, action: Selector) -> HoverButton {
+        let button = HoverButton()
+        let boldConfig = NSImage.SymbolConfiguration(pointSize: 14, weight: .bold)
+        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibilityLabel)?.withSymbolConfiguration(boldConfig)
         button.bezelStyle = .inline
         button.isBordered = false
         button.imagePosition = .imageOnly
+        button.circular = true
         button.target = self
         button.action = action
         button.translatesAutoresizingMaskIntoConstraints = false
