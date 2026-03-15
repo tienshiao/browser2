@@ -109,6 +109,7 @@ class TabSidebarViewController: NSViewController {
         suppressReload = false
         let row = rowForNormalTab(at: index)
         tableView.insertRows(at: IndexSet(integer: row), withAnimation: .slideDown)
+        recheckHoverForVisibleCells()
     }
 
     func removeTab(at index: Int, tabs newTabs: [BrowserTab]) {
@@ -118,6 +119,7 @@ class TabSidebarViewController: NSViewController {
         tabs = newTabs
         suppressReload = false
         tableView.removeRows(at: IndexSet(integer: row), withAnimation: .effectFade)
+        recheckHoverForVisibleCells()
     }
 
     func insertPinnedTab(at index: Int, pinnedTabs newPinned: [BrowserTab]) {
@@ -126,6 +128,7 @@ class TabSidebarViewController: NSViewController {
         pinnedTabs = newPinned
         suppressReload = false
         tableView.insertRows(at: IndexSet(integer: rowForPinnedTab(at: index)), withAnimation: .slideDown)
+        recheckHoverForVisibleCells()
     }
 
     func removePinnedTab(at index: Int, pinnedTabs newPinned: [BrowserTab]) {
@@ -135,6 +138,7 @@ class TabSidebarViewController: NSViewController {
         pinnedTabs = newPinned
         suppressReload = false
         tableView.removeRows(at: IndexSet(integer: row), withAnimation: .effectFade)
+        recheckHoverForVisibleCells()
     }
 
     // MARK: - Animated Pin/Unpin
@@ -519,19 +523,26 @@ class TabSidebarViewController: NSViewController {
         guard let clipView = notification.object as? NSClipView,
               let scrollView = clipView.enclosingScrollView as? DraggableScrollView,
               let pageIndex = pageScrollViews.firstIndex(of: scrollView) else { return }
-        let tv = pageTableViews[pageIndex]
-        let visibleRows = tv.rows(in: tv.visibleRect)
-        for row in visibleRows.lowerBound..<visibleRows.upperBound {
-            guard let cellView = tv.view(atColumn: 0, row: row, makeIfNecessary: false) else { continue }
-            if let tabCell = cellView as? TabCellView {
-                tabCell.recheckHover()
-            } else if let newTabCell = cellView as? NewTabCellView {
-                newTabCell.recheckHover()
-            }
-        }
+        recheckHoverForVisibleCells(in: pageTableViews[pageIndex])
 
         if pageIndex == activePageIndex {
             updateFadeShadows()
+        }
+    }
+
+    private func recheckHoverForVisibleCells(in tv: NSTableView? = nil) {
+        let targetTV = tv ?? tableView
+        DispatchQueue.main.async { [weak self, weak targetTV] in
+            guard self != nil, let tv = targetTV else { return }
+            let visibleRows = tv.rows(in: tv.visibleRect)
+            for row in visibleRows.lowerBound..<visibleRows.upperBound {
+                guard let cellView = tv.view(atColumn: 0, row: row, makeIfNecessary: false) else { continue }
+                if let tabCell = cellView as? TabCellView {
+                    tabCell.recheckHover()
+                } else if let newTabCell = cellView as? NewTabCellView {
+                    newTabCell.recheckHover()
+                }
+            }
         }
     }
 
