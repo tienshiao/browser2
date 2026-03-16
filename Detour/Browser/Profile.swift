@@ -40,6 +40,16 @@ enum ArchiveThreshold: TimeInterval, CaseIterable {
     case never = 0
 }
 
+// MARK: - SleepThreshold
+
+enum SleepThreshold: TimeInterval, CaseIterable {
+    case fifteenMinutes = 900
+    case thirtyMinutes = 1800
+    case oneHour = 3600
+    case twoHours = 7200
+    case never = 0
+}
+
 // MARK: - SearchEngine
 
 enum SearchEngine: Int, CaseIterable {
@@ -94,9 +104,11 @@ class Profile {
     var userAgentMode: UserAgentMode
     var customUserAgent: String?
     var archiveThreshold: ArchiveThreshold
+    var sleepThreshold: SleepThreshold
     var searchEngine: SearchEngine
     var searchSuggestionsEnabled: Bool
-    let isIncognito: Bool
+    var isPerTabIsolation: Bool
+    var isIncognito: Bool
 
     lazy var dataStore: WKWebsiteDataStore = {
         if isIncognito {
@@ -107,15 +119,18 @@ class Profile {
 
     init(id: UUID = UUID(), name: String, userAgentMode: UserAgentMode = .detour,
          customUserAgent: String? = nil, archiveThreshold: ArchiveThreshold = .twelveHours,
-         searchEngine: SearchEngine = .google, searchSuggestionsEnabled: Bool = true,
-         isIncognito: Bool = false) {
+         sleepThreshold: SleepThreshold = .oneHour, searchEngine: SearchEngine = .google,
+         searchSuggestionsEnabled: Bool = true,
+         isPerTabIsolation: Bool = false, isIncognito: Bool = false) {
         self.id = id
         self.name = name
         self.userAgentMode = userAgentMode
         self.customUserAgent = customUserAgent
         self.archiveThreshold = archiveThreshold
+        self.sleepThreshold = sleepThreshold
         self.searchEngine = searchEngine
         self.searchSuggestionsEnabled = searchSuggestionsEnabled
+        self.isPerTabIsolation = isPerTabIsolation
         self.isIncognito = isIncognito
     }
 
@@ -137,8 +152,10 @@ class Profile {
             userAgentMode: userAgentMode.rawValue,
             customUserAgent: customUserAgent,
             archiveThreshold: archiveThreshold.rawValue,
+            sleepThreshold: sleepThreshold.rawValue,
             searchEngine: searchEngine.rawValue,
-            searchSuggestionsEnabled: searchSuggestionsEnabled
+            searchSuggestionsEnabled: searchSuggestionsEnabled,
+            isPerTabIsolation: isPerTabIsolation
         )
     }
 
@@ -146,6 +163,7 @@ class Profile {
         guard let id = UUID(uuidString: record.id) else { return nil }
         let mode = UserAgentMode(rawValue: record.userAgentMode) ?? .detour
         let threshold = ArchiveThreshold(rawValue: record.archiveThreshold) ?? .twelveHours
+        let sleepThreshold = SleepThreshold(rawValue: record.sleepThreshold) ?? .oneHour
         let engine = SearchEngine(rawValue: record.searchEngine) ?? .google
         return Profile(
             id: id,
@@ -153,8 +171,10 @@ class Profile {
             userAgentMode: mode,
             customUserAgent: record.customUserAgent,
             archiveThreshold: threshold,
+            sleepThreshold: sleepThreshold,
             searchEngine: engine,
-            searchSuggestionsEnabled: record.searchSuggestionsEnabled
+            searchSuggestionsEnabled: record.searchSuggestionsEnabled,
+            isPerTabIsolation: record.isPerTabIsolation
         )
     }
 }

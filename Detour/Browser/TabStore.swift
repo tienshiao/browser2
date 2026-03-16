@@ -75,9 +75,14 @@ class Space {
     }
 
     /// Returns a fresh WKWebViewConfiguration wired to this space's profile data store.
+    /// When per-tab isolation is enabled, each call gets its own non-persistent store.
     func makeWebViewConfiguration() -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
-        config.websiteDataStore = dataStore
+        if profile?.isPerTabIsolation == true {
+            config.websiteDataStore = .nonPersistent()
+        } else {
+            config.websiteDataStore = dataStore
+        }
 
         let script = WKUserScript(source: Space.linkHoverScript, injectionTime: .atDocumentEnd, forMainFrameOnly: false)
         config.userContentController.addUserScript(script)
@@ -124,6 +129,7 @@ class Space {
 
 class TabStore {
     static let shared = TabStore()
+    static let incognitoProfileID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
     private let appDB: AppDatabase
     private let historyDB: HistoryDatabase
@@ -171,6 +177,7 @@ class TabStore {
     }
 
     func deleteProfile(id: UUID) {
+        guard id != Self.incognitoProfileID else { return }
         guard profiles.filter({ !$0.isIncognito }).count > 1 else { return }
         let hasSpaces = spaces.contains { $0.profileID == id && !$0.isIncognito }
         guard !hasSpaces else { return }
@@ -194,8 +201,8 @@ class TabStore {
         saveWorkItem?.cancel()
         saveWorkItem = nil
 
-        // Save profiles
-        let profileRecords = profiles.filter { !$0.isIncognito }.map { $0.toRecord() }
+        // Save profiles (persist regular profiles + built-in incognito profile)
+        let profileRecords = profiles.filter { !$0.isIncognito || $0.id == Self.incognitoProfileID }.map { $0.toRecord() }
         appDB.saveProfiles(profileRecords)
 
         let persistentSpaces = spaces.filter { !$0.isIncognito }
@@ -281,6 +288,9 @@ class TabStore {
                 profiles.append(profile)
             }
         }
+
+        // Ensure the built-in incognito profile exists
+        ensureIncognitoProfile()
 
         for (spaceRecord, tabRecords) in session.spaces {
             guard let spaceID = UUID(uuidString: spaceRecord.id) else { continue }
@@ -392,7 +402,7 @@ class TabStore {
 
     // MARK: - History Recording
 
-    private func recordHistoryVisit(tab: BrowserTab, spaceID: UUID) {
+    func recordHistoryVisit(tab: BrowserTab, spaceID: UUID) {
         // Never record history for incognito spaces
         if let space = space(withID: spaceID), space.isIncognito { return }
 
@@ -503,9 +513,21 @@ class TabStore {
     }
 
     @discardableResult
-    func addIncognitoSpace() -> Space {
-        let profile = Profile(name: "Private", isIncognito: true)
+    func ensureIncognitoProfile() -> Profile {
+        if let existing = profiles.first(where: { $0.id == Self.incognitoProfileID }) {
+            existing.isIncognito = true
+            existing.name = "Private"
+            return existing
+        }
+        let profile = Profile(id: Self.incognitoProfileID, name: "Private", isIncognito: true)
         profiles.append(profile)
+        appDB.saveProfile(profile.toRecord())
+        return profile
+    }
+
+    @discardableResult
+    func addIncognitoSpace() -> Space {
+        let profile = ensureIncognitoProfile()
         let space = Space(name: "Private", emoji: "🔒", colorHex: "2C2C2E", profileID: profile.id)
         space.profile = profile
         spaces.append(space)
@@ -519,10 +541,7 @@ class TabStore {
         for tab in space.tabs {
             tabSubscriptions.removeValue(forKey: tab.id)
         }
-        // Remove the transient incognito profile
-        if let profileIndex = profiles.firstIndex(where: { $0.id == space.profileID }) {
-            profiles.remove(at: profileIndex)
-        }
+        // Keep the built-in incognito profile — it persists across sessions
         notifyObservers { $0.tabStoreDidUpdateSpaces() }
     }
 
@@ -823,8 +842,10 @@ class TabStore {
     }
 
     private func sleepStaleTabs() {
-        let cutoff = Date().addingTimeInterval(-3600) // 1 hour
         for space in spaces {
+            let threshold = space.profile?.sleepThreshold ?? .oneHour
+            guard threshold != .never else { continue }
+            let cutoff = Date().addingTimeInterval(-threshold.rawValue)
             for tab in space.tabs + space.pinnedTabs {
                 guard !tab.isSleeping, !tab.isPinned, !tab.isPlayingAudio,
                       let lastDeselected = tab.lastDeselectedAt,

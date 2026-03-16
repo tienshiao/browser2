@@ -238,6 +238,97 @@ final class TabStoreTests: XCTestCase {
                              "Newly pinned tab must have sort order after existing folders")
     }
 
+    // MARK: - Incognito Profile
+
+    func testIncognitoProfileIsIncognitoAfterRestore() throws {
+        // Create a store, trigger incognito profile creation, and save
+        let db = try makeDatabase()
+        let store1 = TabStore(appDB: db)
+        let regularProfile = store1.addProfile(name: "Default")
+        let _ = store1.addSpace(name: "Main", emoji: "🌐", colorHex: "007AFF", profileID: regularProfile.id)
+        store1.ensureIncognitoProfile()
+        store1.saveNow()
+
+        // Create a fresh store from the same DB (simulates app restart)
+        let store2 = TabStore(appDB: db)
+        let _ = store2.restoreSession()
+
+        let incognito = store2.profiles.first { $0.id == TabStore.incognitoProfileID }
+        XCTAssertNotNil(incognito, "Incognito profile should exist after restore")
+        XCTAssertTrue(incognito!.isIncognito,
+                      "Incognito profile must have isIncognito=true after DB round-trip")
+    }
+
+    func testIncognitoProfileDataStoreIsNonPersistent() throws {
+        let db = try makeDatabase()
+        let store1 = TabStore(appDB: db)
+        let regularProfile = store1.addProfile(name: "Default")
+        let _ = store1.addSpace(name: "Main", emoji: "🌐", colorHex: "007AFF", profileID: regularProfile.id)
+        store1.ensureIncognitoProfile()
+        store1.saveNow()
+
+        // Restore into a fresh store
+        let store2 = TabStore(appDB: db)
+        let _ = store2.restoreSession()
+
+        let incognito = store2.profiles.first { $0.id == TabStore.incognitoProfileID }!
+        // A non-persistent data store has isPersistent == false
+        XCTAssertFalse(incognito.dataStore.isPersistent,
+                       "Incognito profile dataStore must be non-persistent after DB round-trip")
+    }
+
+    func testIncognitoSpaceDoesNotRecordHistory() throws {
+        let appDB = try makeDatabase()
+        let historyDB = try HistoryDatabase(dbQueue: DatabaseQueue())
+        let store = TabStore(appDB: appDB, historyDB: historyDB)
+
+        // Set up an incognito space
+        let profile = store.ensureIncognitoProfile()
+        let space = store.addIncognitoSpace()
+
+        // Create a tab with a URL
+        let tab = makeSleepingTab(spaceID: space.id)
+        tab.url = URL(string: "https://secret.example.com")
+        tab.title = "Secret Page"
+        space.tabs.append(tab)
+
+        // Attempt to record history
+        store.recordHistoryVisit(tab: tab, spaceID: space.id)
+
+        // Verify nothing was recorded
+        let results = historyDB.searchHistory(query: "secret", spaceID: space.id.uuidString)
+        XCTAssertTrue(results.isEmpty,
+                      "History must not be recorded for incognito spaces")
+    }
+
+    func testIncognitoSpaceDoesNotRecordHistoryAfterRestore() throws {
+        let appDB = try makeDatabase()
+        let historyDB = try HistoryDatabase(dbQueue: DatabaseQueue())
+
+        // Create store, add incognito profile, save, and restore
+        let store1 = TabStore(appDB: appDB)
+        let regularProfile = store1.addProfile(name: "Default")
+        let _ = store1.addSpace(name: "Main", emoji: "🌐", colorHex: "007AFF", profileID: regularProfile.id)
+        store1.ensureIncognitoProfile()
+        store1.saveNow()
+
+        let store2 = TabStore(appDB: appDB, historyDB: historyDB)
+        let _ = store2.restoreSession()
+
+        // Add an incognito space to the restored store
+        let space = store2.addIncognitoSpace()
+        let tab = makeSleepingTab(spaceID: space.id)
+        tab.url = URL(string: "https://private.example.com")
+        tab.title = "Private Page"
+        space.tabs.append(tab)
+
+        store2.recordHistoryVisit(tab: tab, spaceID: space.id)
+
+        let results = historyDB.searchHistory(query: "private", spaceID: space.id.uuidString)
+        XCTAssertTrue(results.isEmpty,
+                      "History must not be recorded for incognito spaces after DB round-trip")
+    }
+
     // MARK: - Observer Tests
 
     func testPinTabNotifiesObserver() throws {

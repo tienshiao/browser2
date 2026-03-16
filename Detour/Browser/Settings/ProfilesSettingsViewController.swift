@@ -3,16 +3,24 @@ import AppKit
 class ProfilesSettingsViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private var tableView: NSTableView!
     private var archivePopUp: NSPopUpButton!
+    private var sleepPopUp: NSPopUpButton!
+    private var isolationWarningLabel: NSTextField!
     private var searchEnginePopUp: NSPopUpButton!
     private var suggestionsSwitch: NSSwitch!
+    private var perTabIsolationSwitch: NSSwitch!
     private var userAgentPopUp: NSPopUpButton!
     private var customUserAgentField: NSTextField!
+    private var profileNameField: NSTextField!
+    private var privateNoteLabel: NSTextField!
     private var uaPreviewLabel: NSTextField!
     private var gridView: NSGridView!
     private var addButton: NSButton!
     private var deleteButton: NSButton!
 
-    private var profiles: [Profile] { TabStore.shared.profiles.filter { !$0.isIncognito } }
+    /// All profiles including the built-in incognito profile.
+    private var profiles: [Profile] {
+        TabStore.shared.profiles.filter { !$0.isIncognito || $0.id == TabStore.incognitoProfileID }
+    }
     private var selectedIndex: Int = 0
 
     private var selectedProfile: Profile? {
@@ -98,6 +106,20 @@ class ProfilesSettingsViewController: NSViewController, NSTableViewDataSource, N
         listContainer.addSubview(buttonStack)
 
         // Right side: settings (NSGridView for right-aligned labels)
+        profileNameField = NSTextField()
+        profileNameField.placeholderString = "Profile name"
+        profileNameField.font = .systemFont(ofSize: 13)
+        profileNameField.translatesAutoresizingMaskIntoConstraints = false
+        profileNameField.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        profileNameField.target = self
+        profileNameField.action = #selector(profileNameChanged)
+
+        privateNoteLabel = NSTextField(wrappingLabelWithString: "This profile is used for Private Windows.")
+        privateNoteLabel.font = .systemFont(ofSize: 11)
+        privateNoteLabel.textColor = .secondaryLabelColor
+        privateNoteLabel.translatesAutoresizingMaskIntoConstraints = false
+        privateNoteLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 260).isActive = true
+
         searchEnginePopUp = NSPopUpButton()
         for engine in SearchEngine.allCases {
             searchEnginePopUp.addItem(withTitle: engine.name)
@@ -116,6 +138,25 @@ class ProfilesSettingsViewController: NSViewController, NSTableViewDataSource, N
         }
         archivePopUp.target = self
         archivePopUp.action = #selector(archiveThresholdChanged)
+
+        sleepPopUp = NSPopUpButton()
+        for threshold in SleepThreshold.allCases {
+            sleepPopUp.addItem(withTitle: sleepThresholdTitle(threshold))
+            sleepPopUp.lastItem?.representedObject = threshold
+        }
+        sleepPopUp.target = self
+        sleepPopUp.action = #selector(sleepThresholdChanged)
+
+        isolationWarningLabel = NSTextField(wrappingLabelWithString:
+            "Sleeping tabs will lose session data when per-tab isolation is enabled.")
+        isolationWarningLabel.font = .systemFont(ofSize: 11)
+        isolationWarningLabel.textColor = .secondaryLabelColor
+        isolationWarningLabel.translatesAutoresizingMaskIntoConstraints = false
+        isolationWarningLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 260).isActive = true
+
+        perTabIsolationSwitch = NSSwitch()
+        perTabIsolationSwitch.target = self
+        perTabIsolationSwitch.action = #selector(perTabIsolationToggled)
 
         userAgentPopUp = NSPopUpButton()
         userAgentPopUp.addItems(withTitles: ["Detour", "Safari", "Custom"])
@@ -138,19 +179,26 @@ class ProfilesSettingsViewController: NSViewController, NSTableViewDataSource, N
         uaPreviewLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 260).isActive = true
 
         gridView = NSGridView(views: [
-            [makeLabel("Search engine"), searchEnginePopUp],
-            [makeLabel("Search suggestions"), suggestionsSwitch],
-            [makeLabel("Archive tabs after"), archivePopUp],
-            [makeLabel("User agent"), userAgentPopUp],
-            [makeLabel("Custom string"), customUserAgentField],
-            [NSGridCell.emptyContentView, uaPreviewLabel],
+            [makeLabel("Name"), profileNameField],                   // row 0
+            [NSGridCell.emptyContentView, privateNoteLabel],         // row 1
+            [makeLabel("Search engine"), searchEnginePopUp],         // row 2
+            [makeLabel("Search suggestions"), suggestionsSwitch],    // row 3
+            [makeLabel("Archive tabs after"), archivePopUp],         // row 4
+            [makeLabel("Sleep tabs after"), sleepPopUp],             // row 5
+            [NSGridCell.emptyContentView, isolationWarningLabel],    // row 6
+            [makeLabel("Per-tab isolation"), perTabIsolationSwitch], // row 7
+            [makeLabel("User agent"), userAgentPopUp],               // row 8
+            [makeLabel("Custom string"), customUserAgentField],      // row 9
+            [NSGridCell.emptyContentView, uaPreviewLabel],           // row 10
         ])
         gridView.translatesAutoresizingMaskIntoConstraints = false
         gridView.rowSpacing = spacing
         gridView.columnSpacing = 8
         gridView.column(at: 0).xPlacement = .trailing
         gridView.column(at: 1).xPlacement = .leading
-        gridView.row(at: 4).isHidden = true  // custom string row
+        gridView.row(at: 1).isHidden = true  // private note row
+        gridView.row(at: 6).isHidden = true  // isolation warning row
+        gridView.row(at: 9).isHidden = true  // custom string row
         container.addSubview(gridView)
 
         // Layout
@@ -212,20 +260,42 @@ class ProfilesSettingsViewController: NSViewController, NSTableViewDataSource, N
         }
     }
 
+    private func sleepThresholdTitle(_ t: SleepThreshold) -> String {
+        switch t {
+        case .fifteenMinutes: return "15 minutes"
+        case .thirtyMinutes: return "30 minutes"
+        case .oneHour: return "1 hour"
+        case .twoHours: return "2 hours"
+        case .never: return "Never"
+        }
+    }
+
     private func spaceCount(for profile: Profile) -> Int {
         TabStore.shared.spaces.filter { $0.profileID == profile.id && !$0.isIncognito }.count
     }
 
     private func updateRightPane() {
         guard let profile = selectedProfile else { return }
+        profileNameField.stringValue = profile.name
+        profileNameField.isEditable = !profile.isIncognito
+        gridView.row(at: 1).isHidden = !profile.isIncognito
         if let index = ArchiveThreshold.allCases.firstIndex(of: profile.archiveThreshold) {
             archivePopUp.selectItem(at: index)
         }
+        if let index = SleepThreshold.allCases.firstIndex(of: profile.sleepThreshold) {
+            sleepPopUp.selectItem(at: index)
+        }
         searchEnginePopUp.selectItem(at: profile.searchEngine.rawValue)
         suggestionsSwitch.state = profile.searchSuggestionsEnabled ? .on : .off
+        perTabIsolationSwitch.state = profile.isPerTabIsolation ? .on : .off
         userAgentPopUp.selectItem(at: profile.userAgentMode.rawValue)
         customUserAgentField.stringValue = profile.customUserAgent ?? ""
-        gridView.row(at: 4).isHidden = profile.userAgentMode != .custom
+        // Row 4 = archive (hidden for incognito)
+        gridView.row(at: 4).isHidden = profile.isIncognito
+        // Row 6 = isolation warning (shown when both per-tab isolation and sleep are active)
+        gridView.row(at: 6).isHidden = !(profile.isPerTabIsolation && profile.sleepThreshold != .never)
+        // Row 9 = custom UA string
+        gridView.row(at: 9).isHidden = profile.userAgentMode != .custom
         updateUAPreview()
     }
 
@@ -234,11 +304,27 @@ class ProfilesSettingsViewController: NSViewController, NSTableViewDataSource, N
     }
 
     private func updateButtonStates() {
-        let canDelete = profiles.count > 1 && selectedProfile != nil
+        let canDelete = profiles.count > 1
+            && selectedProfile != nil
+            && selectedProfile?.id != TabStore.incognitoProfileID
         deleteButton.isEnabled = canDelete
     }
 
     // MARK: - Actions
+
+    @objc private func profileNameChanged() {
+        guard let profile = selectedProfile else { return }
+        guard !profile.isIncognito else { return }
+        let newName = profileNameField.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !newName.isEmpty else {
+            profileNameField.stringValue = profile.name
+            return
+        }
+        profile.name = newName
+        TabStore.shared.updateProfile(profile)
+        tableView.reloadData()
+        tableView.selectRowIndexes(IndexSet(integer: selectedIndex), byExtendingSelection: false)
+    }
 
     @objc private func archiveThresholdChanged() {
         guard let profile = selectedProfile,
@@ -260,11 +346,26 @@ class ProfilesSettingsViewController: NSViewController, NSTableViewDataSource, N
         TabStore.shared.updateProfile(profile)
     }
 
+    @objc private func sleepThresholdChanged() {
+        guard let profile = selectedProfile,
+              let threshold = sleepPopUp.selectedItem?.representedObject as? SleepThreshold else { return }
+        profile.sleepThreshold = threshold
+        gridView.row(at: 6).isHidden = !(profile.isPerTabIsolation && threshold != .never)
+        TabStore.shared.updateProfile(profile)
+    }
+
+    @objc private func perTabIsolationToggled() {
+        guard let profile = selectedProfile else { return }
+        profile.isPerTabIsolation = (perTabIsolationSwitch.state == .on)
+        gridView.row(at: 6).isHidden = !(profile.isPerTabIsolation && profile.sleepThreshold != .never)
+        TabStore.shared.updateProfile(profile)
+    }
+
     @objc private func userAgentModeChanged() {
         guard let profile = selectedProfile,
               let mode = UserAgentMode(rawValue: userAgentPopUp.indexOfSelectedItem) else { return }
         profile.userAgentMode = mode
-        gridView.row(at: 4).isHidden = mode != .custom
+        gridView.row(at: 9).isHidden = mode != .custom
         TabStore.shared.updateProfile(profile)
         updateUAPreview()
     }
@@ -293,6 +394,7 @@ class ProfilesSettingsViewController: NSViewController, NSTableViewDataSource, N
 
     @objc private func deleteProfileClicked() {
         guard let profile = selectedProfile else { return }
+        guard profile.id != TabStore.incognitoProfileID else { return }
         guard profiles.count > 1 else { return }
 
         let count = spaceCount(for: profile)
@@ -359,8 +461,12 @@ class ProfilesSettingsViewController: NSViewController, NSTableViewDataSource, N
             nameLabel.stringValue = profile.name
         }
         if let countLabel = cell.viewWithTag(2) as? NSTextField {
-            let count = spaceCount(for: profile)
-            countLabel.stringValue = "\(count) Space\(count == 1 ? "" : "s")"
+            if profile.isIncognito {
+                countLabel.stringValue = "Private Windows"
+            } else {
+                let count = spaceCount(for: profile)
+                countLabel.stringValue = "\(count) Space\(count == 1 ? "" : "s")"
+            }
         }
         return cell
     }

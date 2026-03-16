@@ -400,6 +400,18 @@ struct AppDatabase {
             }
         }
 
+        migrator.registerMigration("v10") { db in
+            try db.alter(table: "profile") { t in
+                t.add(column: "isPerTabIsolation", .boolean).notNull().defaults(to: false)
+            }
+        }
+
+        migrator.registerMigration("v11") { db in
+            try db.alter(table: "profile") { t in
+                t.add(column: "sleepThreshold", .double).notNull().defaults(to: 3600)
+            }
+        }
+
         return migrator
     }
 }

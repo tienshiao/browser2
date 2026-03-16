@@ -933,6 +933,7 @@ class BrowserWindowController: NSWindowController {
     // MARK: - Pin/Unpin
 
     @objc func togglePinTab(_ sender: Any?) {
+        guard !isIncognito else { return }
         guard let tab = selectedTab, let space = activeSpace else { return }
         if tab.isPinned {
             store.unpinTab(id: tab.id, in: space)
@@ -1140,6 +1141,7 @@ extension BrowserWindowController: NSMenuItemValidation {
         }
         if menuItem.action == #selector(togglePinTab(_:)) {
             guard let tab = selectedTab else { return false }
+            if isIncognito { return false }
             menuItem.title = tab.isPinned ? "Unpin Tab" : "Pin Tab"
             if !tab.isPinned && tab.url == nil { return false }
             return true
