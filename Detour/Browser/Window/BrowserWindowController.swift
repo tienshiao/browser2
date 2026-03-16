@@ -169,7 +169,7 @@ class BrowserWindowController: NSWindowController {
 
     // MARK: - Space Switching (per-window)
 
-    func setActiveSpace(id: UUID) {
+    func setActiveSpace(id: UUID, selectTab: Bool = true) {
         guard let space = store.space(withID: id), activeSpaceID != id else { return }
 
         // Save current tab selection for the old space
@@ -188,12 +188,16 @@ class BrowserWindowController: NSWindowController {
         tabSidebar.tintColor = space.color
         tabSidebar.updateSpaceButtons(spaces: store.spaces, activeSpaceID: id)
 
-        // Restore the new space's selected tab
-        if let savedTabID = space.selectedTabID,
-           space.tabs.contains(where: { $0.id == savedTabID }) || space.pinnedTabs.contains(where: { $0.id == savedTabID }) {
-            selectTab(id: savedTabID)
-        } else if let firstTab = space.pinnedTabs.first ?? space.tabs.first {
-            selectTab(id: firstTab.id)
+        if selectTab {
+            // Restore the new space's selected tab
+            if let savedTabID = space.selectedTabID,
+               space.tabs.contains(where: { $0.id == savedTabID }) || space.pinnedTabs.contains(where: { $0.id == savedTabID }) {
+                self.selectTab(id: savedTabID)
+            } else if let firstTab = space.pinnedTabs.first ?? space.tabs.first {
+                self.selectTab(id: firstTab.id)
+            } else {
+                deselectAllTabs()
+            }
         } else {
             deselectAllTabs()
         }

@@ -61,22 +61,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func createNewWindow() {
         let wc = BrowserWindowController(incognito: false)
         windowControllers.append(wc)
-        wc.showWindow(nil)
 
-        // Set active space: prefer current window's space, fall back to last active or first space
+        // Set active space before showing the window to avoid stealing WebView ownership.
+        // selectTab: false ensures no tab is selected when the window becomes key.
         if let currentWC = NSApp.keyWindow?.windowController as? BrowserWindowController,
            !currentWC.isIncognito,
            let spaceID = currentWC.activeSpaceID,
            TabStore.shared.space(withID: spaceID) != nil {
-            wc.setActiveSpace(id: spaceID)
+            wc.setActiveSpace(id: spaceID, selectTab: false)
         } else if let lastID = TabStore.shared.lastActiveSpaceID,
                   TabStore.shared.space(withID: lastID) != nil {
-            wc.setActiveSpace(id: lastID)
+            wc.setActiveSpace(id: lastID, selectTab: false)
         } else if let firstSpace = TabStore.shared.spaces.first(where: { !$0.isIncognito }) {
-            wc.setActiveSpace(id: firstSpace.id)
+            wc.setActiveSpace(id: firstSpace.id, selectTab: false)
         }
 
-        wc.deselectAllTabs()
+        wc.showWindow(nil)
         observeWindowClose(wc)
     }
 
