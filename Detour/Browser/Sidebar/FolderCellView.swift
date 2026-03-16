@@ -2,7 +2,6 @@ import AppKit
 
 class FolderCellView: NSTableCellView {
     private let disclosureButton = NSButton()
-    private let folderIcon = NSImageView()
     private let nameLabel = NSTextField(labelWithString: "")
     private let hoverBackground = NSView()
     private var trackingArea: NSTrackingArea?
@@ -22,35 +21,27 @@ class FolderCellView: NSTableCellView {
         disclosureButton.bezelStyle = .inline
         disclosureButton.isBordered = false
         disclosureButton.imagePosition = .imageOnly
+        disclosureButton.imageScaling = .scaleProportionallyUpOrDown
         disclosureButton.target = self
         disclosureButton.action = #selector(disclosureTapped)
         disclosureButton.translatesAutoresizingMaskIntoConstraints = false
 
-        folderIcon.imageScaling = .scaleProportionallyUpOrDown
-        folderIcon.translatesAutoresizingMaskIntoConstraints = false
-        folderIcon.image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: "Folder")
-
+        nameLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(disclosureButton)
-        addSubview(folderIcon)
         addSubview(nameLabel)
 
-        leadingConstraint = disclosureButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4)
+        leadingConstraint = disclosureButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2)
 
         NSLayoutConstraint.activate([
             leadingConstraint,
             disclosureButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            disclosureButton.widthAnchor.constraint(equalToConstant: 16),
-            disclosureButton.heightAnchor.constraint(equalToConstant: 16),
+            disclosureButton.widthAnchor.constraint(equalToConstant: 20),
+            disclosureButton.heightAnchor.constraint(equalToConstant: 20),
 
-            folderIcon.leadingAnchor.constraint(equalTo: disclosureButton.trailingAnchor, constant: 2),
-            folderIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            folderIcon.widthAnchor.constraint(equalToConstant: 16),
-            folderIcon.heightAnchor.constraint(equalToConstant: 16),
-
-            nameLabel.leadingAnchor.constraint(equalTo: folderIcon.trailingAnchor, constant: 6),
+            nameLabel.leadingAnchor.constraint(equalTo: disclosureButton.trailingAnchor, constant: 4),
             nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -4),
         ])
@@ -60,11 +51,10 @@ class FolderCellView: NSTableCellView {
 
     func configure(name: String, isCollapsed: Bool, depth: Int, color: NSColor?) {
         nameLabel.stringValue = name
-        leadingConstraint.constant = 4 + CGFloat(depth) * 16
-        folderIcon.contentTintColor = color ?? .secondaryLabelColor
-
-        let chevron = isCollapsed ? "chevron.right" : "chevron.down"
-        disclosureButton.image = NSImage(systemSymbolName: chevron, accessibilityDescription: isCollapsed ? "Expand" : "Collapse")
+        leadingConstraint.constant = 2 + CGFloat(depth) * 16
+        let symbolName = isCollapsed ? "font-awesome-folder.fill" : "font-awesome-folder-open.fill"
+        disclosureButton.image = NSImage(named: symbolName)
+        disclosureButton.contentTintColor = (color ?? .secondaryLabelColor).withAlphaComponent(0.7)
     }
 
     override func prepareForReuse() {
