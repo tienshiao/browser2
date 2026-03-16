@@ -148,6 +148,11 @@ class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource, NS
         ])
     }
 
+    override func resetCursorRects() {
+        discardCursorRects()
+        addCursorRect(bounds, cursor: .arrow)
+    }
+
     override func mouseDown(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
         if !glassContainer.frame.contains(location) {
@@ -214,7 +219,7 @@ class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource, NS
 
     private func gatherTabInfos() -> [SuggestionProvider.TabInfo] {
         (tabStore?.spaces ?? []).flatMap { space in
-            space.tabs.map { tab in
+            (space.tabs + space.pinnedTabs).map { tab in
                 SuggestionProvider.TabInfo(
                     tabID: tab.id,
                     spaceID: space.id,
@@ -384,6 +389,40 @@ class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource, NS
 // MARK: - CommandPaletteRowView
 
 private class CommandPaletteRowView: NSTableRowView {
+    private var isHovered = false
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp],
+            owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        needsDisplay = true
+    }
+
+    override func resetCursorRects() {
+        discardCursorRects()
+        addCursorRect(bounds, cursor: .arrow)
+    }
+
+    override func drawBackground(in dirtyRect: NSRect) {
+        if isHovered && !isSelected {
+            NSColor.labelColor.withAlphaComponent(0.06).setFill()
+            let rect = bounds.insetBy(dx: 4, dy: 1)
+            NSBezierPath(roundedRect: rect, xRadius: UIConstants.defaultCornerRadius, yRadius: UIConstants.defaultCornerRadius).fill()
+        }
+    }
+
     override func drawSelection(in dirtyRect: NSRect) {
         let alpha: CGFloat = isEmphasized ? 0.15 : 0.08
         NSColor.labelColor.withAlphaComponent(alpha).setFill()

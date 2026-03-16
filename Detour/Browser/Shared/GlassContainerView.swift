@@ -40,6 +40,7 @@ class GlassContainerView: NSView {
             ])
         } else {
             wantsLayer = true
+            layer?.backgroundColor = NSColor.clear.cgColor
             shadow = NSShadow()
             layer?.shadowColor = NSColor.black.cgColor
             layer?.shadowOpacity = 0.5
