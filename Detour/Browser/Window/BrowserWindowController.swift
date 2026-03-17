@@ -901,6 +901,10 @@ class BrowserWindowController: NSWindowController {
         splitScrimView = nil
         contentScrimView?.removeFromSuperview()
         contentScrimView = nil
+        // Restore first responder to peek overlay so Esc still works
+        if let peek = peekOverlayView {
+            window?.makeFirstResponder(peek)
+        }
     }
 
     func deselectAllTabs() {
