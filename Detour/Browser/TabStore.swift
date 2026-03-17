@@ -236,7 +236,9 @@ class TabStore {
                     interactionState: stateData,
                     sortOrder: tabIndex,
                     lastDeselectedAt: tab.lastDeselectedAt?.timeIntervalSince1970,
-                    parentID: tab.parentID?.uuidString
+                    parentID: tab.parentID?.uuidString,
+                    peekURL: tab.peekURL?.absoluteString,
+                    peekInteractionState: tab.peekInteractionState
                 ))
             }
             sessionData.append((spaceRecord, tabRecords))
@@ -274,7 +276,9 @@ class TabStore {
                     faviconURL: tab.faviconURL?.absoluteString,
                     interactionState: stateData,
                     sortOrder: tab.pinnedSortOrder ?? 0,
-                    folderID: tab.folderID?.uuidString
+                    folderID: tab.folderID?.uuidString,
+                    peekURL: tab.peekURL?.absoluteString,
+                    peekInteractionState: tab.peekInteractionState
                 ))
             }
 
@@ -339,6 +343,8 @@ class TabStore {
                 }
                 tab.spaceID = spaceID
                 tab.parentID = tabRecord.parentID.flatMap { UUID(uuidString: $0) }
+                tab.peekURL = tabRecord.peekURL.flatMap { URL(string: $0) }
+                tab.peekInteractionState = tabRecord.peekInteractionState
                 space.tabs.append(tab)
                 self.subscribeToTab(tab, spaceID: spaceID)
             }
@@ -387,6 +393,8 @@ class TabStore {
                 tab.folderID = pinnedRecord.folderID.flatMap { UUID(uuidString: $0) }
                 tab.pinnedSortOrder = pinnedRecord.sortOrder
                 tab.spaceID = spaceID
+                tab.peekURL = pinnedRecord.peekURL.flatMap { URL(string: $0) }
+                tab.peekInteractionState = pinnedRecord.peekInteractionState
                 space.pinnedTabs.append(tab)
                 self.subscribeToTab(tab, spaceID: spaceID)
             }

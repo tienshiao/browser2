@@ -182,8 +182,11 @@ class BrowserWindowController: NSWindowController {
         // Save current tab selection for the old space
         activeSpace?.selectedTabID = selectedTabID
 
-        // Dismiss peek overlay on space switch
-        dismissPeekOverlay()
+        // Save peek state to outgoing tab before switching spaces
+        if let previousTab = selectedTab, peekOverlayView != nil {
+            savePeekState(to: previousTab)
+        }
+        tearDownPeekUI()
 
         activeSpaceID = id
         tabSidebar.activeSpaceID = id
@@ -517,7 +520,12 @@ class BrowserWindowController: NSWindowController {
         guard isPinnedTab || isNormalTab else { return }
 
         dismissCommandPalette()
-        dismissPeekOverlay()
+
+        // Save peek state to outgoing tab before tearing down UI
+        if let previousTab = selectedTab, peekOverlayView != nil {
+            savePeekState(to: previousTab)
+        }
+        tearDownPeekUI()
 
         if let previousTab = selectedTab {
             previousTab.lastDeselectedAt = Date()
@@ -593,6 +601,11 @@ class BrowserWindowController: NSWindowController {
             claimWebView(for: tab)
         } else {
             showSnapshot(for: tab)
+        }
+
+        // Restore peek overlay if the incoming tab had one
+        if let peekURL = tab.peekURL {
+            showPeekOverlay(url: peekURL, clickPoint: nil, interactionState: tab.peekInteractionState)
         }
     }
 
@@ -706,6 +719,12 @@ class BrowserWindowController: NSWindowController {
               let tab = selectedTab else { return }
 
         if ownsWebView {
+            // Save peek state before losing ownership
+            if peekOverlayView != nil {
+                savePeekState(to: tab)
+            }
+            tearDownPeekUI()
+
             ownsWebView = false
             if let image = notification.userInfo?["snapshot"] as? NSImage {
                 localSnapshot = image
@@ -989,7 +1008,21 @@ class BrowserWindowController: NSWindowController {
 
     // MARK: - Peek Overlay
 
-    func showPeekOverlay(url: URL, clickPoint: CGPoint? = nil) {
+    private func savePeekState(to tab: BrowserTab) {
+        tab.peekURL = peekWebView?.url ?? tab.peekURL
+        if let state = peekWebView?.interactionState {
+            tab.peekInteractionState = try? NSKeyedArchiver.archivedData(withRootObject: state, requiringSecureCoding: false)
+        }
+    }
+
+    private func tearDownPeekUI() {
+        peekOverlayView?.removeFromSuperview()
+        peekOverlayView = nil
+        peekWebView?.removeFromSuperview()
+        peekWebView = nil
+    }
+
+    func showPeekOverlay(url: URL, clickPoint: CGPoint? = nil, interactionState: Data? = nil) {
         guard let space = activeSpace else { return }
         dismissPeekOverlay()
 
@@ -997,6 +1030,7 @@ class BrowserWindowController: NSWindowController {
         let peekWebView = WKWebView(frame: .zero, configuration: config)
         peekWebView.navigationDelegate = self
         peekWebView.isInspectable = true
+        peekWebView.allowsBackForwardNavigationGestures = true
 
         self.peekWebView = peekWebView
 
@@ -1052,12 +1086,29 @@ class BrowserWindowController: NSWindowController {
             peekWebView.alphaValue = 1
         }
 
-        peekWebView.load(URLRequest(url: url))
+        // Restore from interaction state if available, otherwise load URL
+        if let interactionState,
+           let unarchiver = try? NSKeyedUnarchiver(forReadingFrom: interactionState) {
+            unarchiver.requiresSecureCoding = false
+            if let state = unarchiver.decodeObject(forKey: NSKeyedArchiveRootObjectKey) {
+                peekWebView.interactionState = state
+            } else {
+                peekWebView.load(URLRequest(url: url))
+            }
+        } else {
+            peekWebView.load(URLRequest(url: url))
+        }
+
         peekOverlayView = overlay
+        selectedTab?.peekURL = url
+        store.scheduleSave()
     }
 
     private func dismissPeekOverlay() {
         guard let overlay = peekOverlayView else { return }
+        selectedTab?.peekURL = nil
+        selectedTab?.peekInteractionState = nil
+        store.scheduleSave()
         peekOverlayView = nil
         let peekWebView = self.peekWebView
         self.peekWebView = nil
@@ -1091,6 +1142,11 @@ class BrowserWindowController: NSWindowController {
             dismissPeekOverlay()
             return
         }
+
+        // Clear peek state on original tab
+        selectedTab?.peekURL = nil
+        selectedTab?.peekInteractionState = nil
+        store.scheduleSave()
 
         // Create tab with the existing webview
         let tab = store.addTab(in: space, webView: webView, parentID: selectedTabID)
@@ -1198,11 +1254,19 @@ extension BrowserWindowController: NSWindowDelegate {
     func windowDidBecomeKey(_ notification: Notification) {
         if let tab = selectedTab {
             claimWebView(for: tab)
+            // Restore peek overlay if the tab has one and we don't already have it showing
+            if peekOverlayView == nil, let peekURL = tab.peekURL {
+                showPeekOverlay(url: peekURL, clickPoint: nil, interactionState: tab.peekInteractionState)
+            }
         }
     }
 
     func windowWillClose(_ notification: Notification) {
-        dismissPeekOverlay()
+        if let tab = selectedTab, peekOverlayView != nil {
+            savePeekState(to: tab)
+        }
+        tearDownPeekUI()
+        store.saveNow()
         store.removeObserver(self)
 
         if isIncognito, let spaceID = incognitoSpaceID {

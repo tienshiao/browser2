@@ -456,6 +456,17 @@ struct AppDatabase {
             }
         }
 
+        migrator.registerMigration("v14") { db in
+            try db.alter(table: "tab") { t in
+                t.add(column: "peekURL", .text)
+                t.add(column: "peekInteractionState", .blob)
+            }
+            try db.alter(table: "pinnedTab") { t in
+                t.add(column: "peekURL", .text)
+                t.add(column: "peekInteractionState", .blob)
+            }
+        }
+
         return migrator
     }
 }

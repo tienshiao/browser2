@@ -13,4 +13,6 @@ struct TabRecord: Codable, FetchableRecord, PersistableRecord {
     var sortOrder: Int
     var lastDeselectedAt: Double?
     var parentID: String?
+    var peekURL: String?
+    var peekInteractionState: Data?
 }

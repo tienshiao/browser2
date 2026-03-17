@@ -28,6 +28,10 @@ class BrowserTab: NSObject {
     var parentID: UUID?
     private var cachedInteractionState: Data?
 
+    // MARK: - Peek State
+    var peekURL: URL?
+    var peekInteractionState: Data?
+
     // MARK: - Archiving
 
     var lastDeselectedAt: Date?

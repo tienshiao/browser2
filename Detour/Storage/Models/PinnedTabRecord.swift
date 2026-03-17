@@ -14,4 +14,6 @@ struct PinnedTabRecord: Codable, FetchableRecord, PersistableRecord {
     var interactionState: Data?
     var sortOrder: Int
     var folderID: String?
+    var peekURL: String?
+    var peekInteractionState: Data?
 }
