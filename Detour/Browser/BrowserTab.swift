@@ -80,16 +80,21 @@ class BrowserTab: NSObject {
     private var previousHost: String?
     private var faviconGeneration: Int = 0
 
-    init(id: UUID = UUID(), configuration: WKWebViewConfiguration = WKWebViewConfiguration()) {
-        self.id = id
+    private static func makeWebView(configuration: WKWebViewConfiguration) -> BrowserWebView {
         configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
         WKPreferencesSetAllowsPictureInPictureMediaPlayback(configuration.preferences, true)
         if configuration.urlSchemeHandler(forURLScheme: ErrorPage.scheme) == nil {
             configuration.setURLSchemeHandler(ErrorSchemeHandler(), forURLScheme: ErrorPage.scheme)
         }
-        self.webView = BrowserWebView(frame: .zero, configuration: configuration)
+        let webView = BrowserWebView(frame: .zero, configuration: configuration)
+        webView.isInspectable = true
+        return webView
+    }
+
+    init(id: UUID = UUID(), configuration: WKWebViewConfiguration = WKWebViewConfiguration()) {
+        self.id = id
+        self.webView = Self.makeWebView(configuration: configuration)
         super.init()
-        self.webView?.isInspectable = true
         applyUserAgent()
         setupObservers()
         NotificationCenter.default.addObserver(self, selector: #selector(userAgentDidChange(_:)), name: .init("UserAgentDidChange"), object: nil)
@@ -354,23 +359,16 @@ class BrowserTab: NSObject {
         } else {
             config = WKWebViewConfiguration()
         }
-        config.preferences.setValue(true, forKey: "developerExtrasEnabled")
-        WKPreferencesSetAllowsPictureInPictureMediaPlayback(config.preferences, true)
-        if config.urlSchemeHandler(forURLScheme: ErrorPage.scheme) == nil {
-            config.setURLSchemeHandler(ErrorSchemeHandler(), forURLScheme: ErrorPage.scheme)
-        }
 
-        let newWebView = BrowserWebView(frame: .zero, configuration: config)
-        newWebView.isInspectable = true
-        self.webView = newWebView
+        self.webView = Self.makeWebView(configuration: config)
         applyUserAgent()
         setupObservers()
 
         if let cachedInteractionState,
            let state = Self.unarchiveInteractionState(cachedInteractionState) {
-            newWebView.interactionState = state
+            webView?.interactionState = state
         } else if let url {
-            newWebView.load(URLRequest(url: url))
+            webView?.load(URLRequest(url: url))
         }
 
         isSleeping = false
