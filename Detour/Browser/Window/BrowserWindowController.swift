@@ -23,6 +23,7 @@ class BrowserWindowController: NSWindowController {
     private var snapshotImageView: NSImageView?
     private var ownsWebView = false
     private var localSnapshot: NSImage?
+    private weak var pipWebView: WKWebView?
 
     private let findBar = FindBarView()
     private let dragHandle = WindowDragView()
@@ -539,6 +540,12 @@ class BrowserWindowController: NSWindowController {
                     self?.localSnapshot = image
                 }
             }
+            if previousTab.isPlayingAudio {
+                previousTab.enterPictureInPicture()
+                // Keep the webView in the hierarchy so WebKit can capture the
+                // video's on-screen frame for the PiP animation origin.
+                pipWebView = previousTab.webView
+            }
         }
         removeContentViews()
         localSnapshot = nil
@@ -577,6 +584,8 @@ class BrowserWindowController: NSWindowController {
         } else {
             showSnapshot(for: tab)
         }
+
+        tab.exitPictureInPicture()
 
         // Restore peek overlay if the incoming tab had one
         if let peekURL = tab.peekURL {
@@ -662,7 +671,7 @@ class BrowserWindowController: NSWindowController {
 
     private func removeContentViews() {
         emptyStateLabel.isHidden = true
-        for subview in contentContainerView.subviews where subview !== findBar && subview !== dragHandle && subview !== peekOverlayView && subview !== peekTab?.webView && subview !== linkStatusBar && subview !== emptyStateLabel {
+        for subview in contentContainerView.subviews where subview !== findBar && subview !== dragHandle && subview !== peekOverlayView && subview !== peekTab?.webView && subview !== linkStatusBar && subview !== emptyStateLabel && subview !== pipWebView {
             if let webView = subview as? WKWebView {
                 webView.configuration.userContentController.removeScriptMessageHandler(forName: "linkHover")
                 webView.configuration.userContentController.removeScriptMessageHandler(forName: BlockedResourceTracker.messageName)
@@ -673,6 +682,14 @@ class BrowserWindowController: NSWindowController {
         webViewTopConstraint = nil
         ownsWebView = false
         linkStatusBar.hide()
+
+        // Clean up the PiP webView after WebKit has captured the animation origin.
+        if let pipping = pipWebView {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                pipping.removeFromSuperview()
+                self?.pipWebView = nil
+            }
+        }
     }
 
     private func bindDisplayTab() {

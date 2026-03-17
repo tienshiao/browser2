@@ -2,6 +2,10 @@ import AppKit
 import WebKit
 import Combine
 
+// Private C API to enable PiP support in WKWebView on macOS
+@_silgen_name("WKPreferencesSetAllowsPictureInPictureMediaPlayback")
+private func WKPreferencesSetAllowsPictureInPictureMediaPlayback(_ preferences: AnyObject, _ allowed: Bool)
+
 class BrowserTab: NSObject {
     let id: UUID
     private(set) var webView: WKWebView?
@@ -79,6 +83,7 @@ class BrowserTab: NSObject {
     init(id: UUID = UUID(), configuration: WKWebViewConfiguration = WKWebViewConfiguration()) {
         self.id = id
         configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        WKPreferencesSetAllowsPictureInPictureMediaPlayback(configuration.preferences, true)
         if configuration.urlSchemeHandler(forURLScheme: ErrorPage.scheme) == nil {
             configuration.setURLSchemeHandler(ErrorSchemeHandler(), forURLScheme: ErrorPage.scheme)
         }
@@ -171,6 +176,33 @@ class BrowserTab: NSObject {
                   space.profileID == profileID else { return }
         }
         applyUserAgent()
+    }
+
+    func enterPictureInPicture() {
+        guard let webView else { return }
+        let js = """
+        (function() {
+            const video = document.querySelector('video');
+            if (video && !video.paused && video.webkitSupportsPresentationMode
+                && video.webkitSupportsPresentationMode('picture-in-picture')) {
+                video.webkitSetPresentationMode('picture-in-picture');
+            }
+        })()
+        """
+        webView.evaluateJavaScript(js)
+    }
+
+    func exitPictureInPicture() {
+        guard let webView else { return }
+        let js = """
+        (function() {
+            const video = document.querySelector('video');
+            if (video && video.webkitPresentationMode === 'picture-in-picture') {
+                video.webkitSetPresentationMode('inline');
+            }
+        })()
+        """
+        webView.evaluateJavaScript(js)
     }
 
     func toggleMute() {
@@ -323,6 +355,7 @@ class BrowserTab: NSObject {
             config = WKWebViewConfiguration()
         }
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        WKPreferencesSetAllowsPictureInPictureMediaPlayback(config.preferences, true)
         if config.urlSchemeHandler(forURLScheme: ErrorPage.scheme) == nil {
             config.setURLSchemeHandler(ErrorSchemeHandler(), forURLScheme: ErrorPage.scheme)
         }
@@ -432,3 +465,4 @@ class BrowserTab: NSObject {
         return str
     }
 }
+
