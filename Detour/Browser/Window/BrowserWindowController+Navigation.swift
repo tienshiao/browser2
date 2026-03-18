@@ -54,11 +54,12 @@ extension BrowserWindowController: WKNavigationDelegate {
 
         // Peek mode: intercept cross-host navigation on pinned tabs
         // Only intercept on the pinned tab's own webView, not the peek webView
-        if let tab = selectedTab, tab.isPinned,
+        if let tab = selectedTab,
+           let pinnedEntry = activeSpace?.pinnedEntries.first(where: { $0.tab?.id == tab.id }),
            webView === tab.webView,
            peekOverlayView == nil,
            let url = navigationAction.request.url,
-           let pinnedHost = tab.pinnedURL?.host,
+           let pinnedHost = pinnedEntry.pinnedURL.host,
            let targetHost = url.host,
            targetHost != pinnedHost,
            navigationAction.navigationType == .linkActivated {

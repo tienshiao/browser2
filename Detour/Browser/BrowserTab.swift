@@ -40,40 +40,6 @@ class BrowserTab: NSObject {
 
     var lastDeselectedAt: Date?
 
-    // MARK: - Pinned Tab Properties
-
-    var isPinned: Bool = false
-    var pinnedURL: URL?
-    var pinnedTitle: String?
-    var folderID: UUID?
-    var pinnedSortOrder: Int?
-
-    var pinnedDisplayTitle: String {
-        guard isPinned, let pinnedTitle else { return title }
-        if isAtPinnedHome { return pinnedTitle }
-        if isNavigatedWithinPinnedHost {
-            let pageTitle = webView?.title ?? title
-            return "/ \(pageTitle)"
-        }
-        return title
-    }
-
-    var isAtPinnedHome: Bool {
-        guard isPinned else { return false }
-        guard let pinnedURL else { return url == nil }
-        return url == pinnedURL
-    }
-
-    var isNavigatedWithinPinnedHost: Bool {
-        guard isPinned, let pinnedURL, let currentURL = url else { return false }
-        return currentURL.host == pinnedURL.host && currentURL != pinnedURL
-    }
-
-    func resetToPinnedHome() {
-        guard isPinned, let pinnedURL else { return }
-        load(pinnedURL)
-    }
-
     private var faviconCancellables = Set<AnyCancellable>()
     private var lastAttemptedURL: URL?
     private var navigationPending = false

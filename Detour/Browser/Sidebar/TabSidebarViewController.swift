@@ -113,12 +113,12 @@ class TabSidebarViewController: NSViewController {
         didSet { updateActivePage() }
     }
 
-    var pinnedTabs: [BrowserTab] = []
+    var pinnedEntries: [PinnedEntry] = []
     var tabs: [BrowserTab] = []
 
     /// Pending state deferred during drag. The last applyState call during isDragging
     /// stores its args here; the drag handler applies it after clearing isDragging.
-    private var pendingState: (pinnedTabs: [BrowserTab], pinnedFolders: [PinnedFolder],
+    private var pendingState: (pinnedEntries: [PinnedEntry], pinnedFolders: [PinnedFolder],
                                tabs: [BrowserTab], selectedTabID: UUID?)?
 
     private func resolveSelectedTabID(_ explicit: UUID?) -> UUID? {
@@ -126,8 +126,8 @@ class TabSidebarViewController: NSViewController {
         let row = tableView.selectedRow
         if row >= 0, case .pinnedItem(let idx) = sidebarRow(for: row),
            idx < flattenedPinnedItems.count,
-           case .tab(let tab, _) = flattenedPinnedItems[idx] {
-            return tab.id
+           case .entry(let entry, _) = flattenedPinnedItems[idx] {
+            return entry.tab?.id
         }
         return nil
     }
@@ -135,7 +135,7 @@ class TabSidebarViewController: NSViewController {
     func rebuildFlattenedPinnedItems(selectedTabID: UUID? = nil) {
         let collapsedIDs = Set(pinnedFolders.filter(\.isCollapsed).map(\.id))
         flattenedPinnedItems = flattenPinnedTree(
-            tabs: pinnedTabs,
+            entries: pinnedEntries,
             folders: pinnedFolders,
             collapsedFolderIDs: collapsedIDs,
             selectedTabID: resolveSelectedTabID(selectedTabID)
@@ -144,7 +144,7 @@ class TabSidebarViewController: NSViewController {
 
     // MARK: - Unified State Update
 
-    func applyState(pinnedTabs newPinned: [BrowserTab], pinnedFolders newFolders: [PinnedFolder],
+    func applyState(pinnedEntries newPinned: [PinnedEntry], pinnedFolders newFolders: [PinnedFolder],
                     tabs newTabs: [BrowserTab], selectedTabID: UUID? = nil) {
         // During drag, defer the update — the drag handler will apply it
         if isDragging {
@@ -156,7 +156,7 @@ class TabSidebarViewController: NSViewController {
         let collapsedIDs = Set(newFolders.filter(\.isCollapsed).map(\.id))
         let resolvedID = resolveSelectedTabID(selectedTabID)
         let newPinnedItems = flattenPinnedTree(
-            tabs: newPinned, folders: newFolders,
+            entries: newPinned, folders: newFolders,
             collapsedFolderIDs: collapsedIDs, selectedTabID: resolvedID
         )
 
@@ -176,13 +176,13 @@ class TabSidebarViewController: NSViewController {
                 tableView.moveRow(at: move.from, to: move.to)
             }
             pinnedFolders = newFolders
-            pinnedTabs = newPinned
+            pinnedEntries = newPinned
             tabs = newTabs
             flattenedPinnedItems = newPinnedItems
             tableView.endUpdates()
         } else {
             pinnedFolders = newFolders
-            pinnedTabs = newPinned
+            pinnedEntries = newPinned
             tabs = newTabs
             flattenedPinnedItems = newPinnedItems
         }
@@ -191,7 +191,7 @@ class TabSidebarViewController: NSViewController {
         for (idx, item) in flattenedPinnedItems.enumerated() {
             let row = rowForPinnedItem(at: idx)
             switch item {
-            case .tab(_, let depth):
+            case .entry(_, let depth):
                 if let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? TabCellView {
                     cell.indentLevel = depth
                 }
@@ -221,12 +221,12 @@ class TabSidebarViewController: NSViewController {
         guard let pending = pendingState else { return }
         pendingState = nil
         DispatchQueue.main.async { [self] in
-            applyState(pinnedTabs: pending.pinnedTabs, pinnedFolders: pending.pinnedFolders,
+            applyState(pinnedEntries: pending.pinnedEntries, pinnedFolders: pending.pinnedFolders,
                        tabs: pending.tabs, selectedTabID: pending.selectedTabID)
             if let selectTabID {
                 // Select in pinned section
                 if let flatIdx = flattenedPinnedItems.firstIndex(where: {
-                    if case .tab(let t, _) = $0 { return t.id == selectTabID }
+                    if case .entry(let e, _) = $0 { return e.id == selectTabID }
                     return false
                 }) {
                     tableView.selectRowIndexes(IndexSet(integer: rowForPinnedItem(at: flatIdx)), byExtendingSelection: false)
@@ -297,10 +297,10 @@ class TabSidebarViewController: NSViewController {
             }
         }
         set {
-            guard newValue >= 0, newValue < pinnedTabs.count else { return }
-            let tabID = pinnedTabs[newValue].id
+            guard newValue >= 0, newValue < pinnedEntries.count else { return }
+            let entryID = pinnedEntries[newValue].id
             guard let flatIdx = flattenedPinnedItems.firstIndex(where: {
-                if case .tab(let t, _) = $0 { return t.id == tabID }
+                if case .entry(let e, _) = $0 { return e.id == entryID }
                 return false
             }) else { return }
             tableView.selectRowIndexes(IndexSet(integer: rowForPinnedItem(at: flatIdx)), byExtendingSelection: false)
@@ -982,14 +982,14 @@ class TabSidebarViewController: NSViewController {
         return spaces[index].tabs
     }
 
-    private func tabsAndPinnedForTableView(_ tv: NSTableView) -> (pinned: [BrowserTab], normal: [BrowserTab]) {
+    private func tabsAndPinnedForTableView(_ tv: NSTableView) -> (pinnedEntries: [PinnedEntry], normal: [BrowserTab]) {
         guard let index = pageTableViews.firstIndex(where: { $0 === tv }) else {
-            return (pinnedTabs, tabs)
+            return (pinnedEntries, tabs)
         }
-        if index == activePageIndex { return (pinnedTabs, tabs) }
+        if index == activePageIndex { return (pinnedEntries, tabs) }
         let spaces = relevantSpaces
         guard index < spaces.count else { return ([], []) }
-        return (spaces[index].pinnedTabs, spaces[index].tabs)
+        return (spaces[index].pinnedEntries, spaces[index].tabs)
     }
 
     private func pinnedItemCountForTableView(_ tv: NSTableView) -> Int {
@@ -1002,7 +1002,7 @@ class TabSidebarViewController: NSViewController {
         guard index < spaces.count else { return 0 }
         let space = spaces[index]
         let items = flattenPinnedTree(
-            tabs: space.pinnedTabs,
+            entries: space.pinnedEntries,
             folders: space.pinnedFolders,
             collapsedFolderIDs: Set(space.pinnedFolders.filter(\.isCollapsed).map(\.id)),
             selectedTabID: nil
@@ -1015,14 +1015,22 @@ class TabSidebarViewController: NSViewController {
         tableView.reloadData(forRowIndexes: IndexSet(integer: rowForNormalTab(at: index)), columnIndexes: IndexSet(integer: 0))
     }
 
-    func reloadPinnedTab(at index: Int) {
-        guard index >= 0, index < pinnedTabs.count else { return }
-        let tabID = pinnedTabs[index].id
+    func reloadPinnedEntry(at index: Int) {
+        guard index >= 0, index < pinnedEntries.count else { return }
+        let entryID = pinnedEntries[index].id
         guard let flatIdx = flattenedPinnedItems.firstIndex(where: {
-            if case .tab(let t, _) = $0 { return t.id == tabID }
+            if case .entry(let e, _) = $0 { return e.id == entryID }
             return false
         }) else { return }
-        tableView.reloadData(forRowIndexes: IndexSet(integer: rowForPinnedItem(at: flatIdx)), columnIndexes: IndexSet(integer: 0))
+        let row = rowForPinnedItem(at: flatIdx)
+        tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+        // After reload the new cell has no hover state — recheck since mouse may already be over it
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if let cell = self.tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? TabCellView {
+                cell.recheckHover()
+            }
+        }
     }
 }
 
@@ -1157,8 +1165,8 @@ extension TabSidebarViewController: NSTableViewDataSource {
             case .pinnedItem(let srcIdx):
                 guard srcIdx < flattenedPinnedItems.count else { return false }
                 switch flattenedPinnedItems[srcIdx] {
-                case .tab(let tab, _):
-                    delegate?.tabSidebar(self, didRequestMovePinnedTabToFolder: tab.id, folderID: folder.id, beforeItemID: nil)
+                case .entry(let entry, _):
+                    delegate?.tabSidebar(self, didRequestMovePinnedTabToFolder: entry.id, folderID: folder.id, beforeItemID: nil)
                 case .folder(let srcFolder, _):
                     guard srcFolder.id != folder.id else { return false }  // can't drop folder onto itself
                     delegate?.tabSidebar(self, didRequestMovePinnedFolder: srcFolder.id, parentFolderID: folder.id, beforeItemID: nil)
@@ -1170,7 +1178,7 @@ extension TabSidebarViewController: NSTableViewDataSource {
                 delegate?.tabSidebar(self, didDragTabToPinAt: srcIdx, destinationIndex: 0)
                 // Model is deferred in pendingState — look there for the newly pinned tab
                 if let pending = pendingState,
-                   pending.pinnedTabs.contains(where: { $0.id == draggedTabID }) {
+                   pending.pinnedEntries.contains(where: { $0.id == draggedTabID || $0.tab?.id == draggedTabID }) {
                     delegate?.tabSidebar(self, didRequestMovePinnedTabToFolder: draggedTabID, folderID: folder.id, beforeItemID: nil)
                 }
                 isDragging = false
@@ -1204,8 +1212,8 @@ extension TabSidebarViewController: NSTableViewDataSource {
             let targetFolderID = folderIDForFlattenedIndex(dstIdx)
             let beforeItemID = itemIDAtDropIndex(dstIdx, in: flattenedPinnedItems)
             switch flattenedPinnedItems[srcIdx] {
-            case .tab(let tab, _):
-                delegate?.tabSidebar(self, didRequestMovePinnedTabToFolder: tab.id,
+            case .entry(let entry, _):
+                delegate?.tabSidebar(self, didRequestMovePinnedTabToFolder: entry.id,
                                      folderID: targetFolderID, beforeItemID: beforeItemID)
 
             case .folder(let folder, _):
@@ -1237,9 +1245,8 @@ extension TabSidebarViewController: NSTableViewDataSource {
 
         case (.pinnedItem(let srcIdx), .normalTab(let dstIdx)):
             guard srcIdx < flattenedPinnedItems.count,
-                  case .tab(let tab, _) = flattenedPinnedItems[srcIdx],
-                  let pinnedArrayIdx = pinnedTabs.firstIndex(where: { $0.id == tab.id }) else { return false }
-            let tabID = tab.id
+                  case .entry(let entry, _) = flattenedPinnedItems[srcIdx],
+                  let pinnedArrayIdx = pinnedEntries.firstIndex(where: { $0.id == entry.id }) else { return false }
 
             delegate?.tabSidebar(self, didDragPinnedTabToUnpinAt: pinnedArrayIdx, destinationIndex: dstIdx)
 
@@ -1288,15 +1295,40 @@ extension TabSidebarViewController: NSTableViewDelegate {
             guard index < flattenedPinnedItems.count else { return makeTabCell(tableView) }
             let item = flattenedPinnedItems[index]
             switch item {
-            case .tab(let tab, let depth):
+            case .entry(let entry, let depth):
                 let cell = makeTabCell(tableView)
-                configureTabCell(cell, tab: tab, title: tab.pinnedDisplayTitle, pinnedTab: tab, isActive: isActive, indentLevel: depth) { [weak self] row in
-                    guard let self, case .pinnedItem(let idx) = self.sidebarRow(for: row) else { return }
-                    if case .tab(let t, _) = self.flattenedPinnedItems[idx] {
-                        if let pinnedIdx = self.pinnedTabs.firstIndex(where: { $0.id == t.id }) {
-                            self.delegate?.tabSidebar(self, didRequestClosePinnedTabAt: pinnedIdx)
+                let tab = entry.tab
+                let title = entry.displayTitle
+                let favicon = entry.displayFavicon
+                let isLoading = tab?.isLoading ?? false
+                let isSleeping = tab?.isSleeping ?? false
+                let progress = tab?.estimatedProgress ?? 0
+                let isPlayingAudio = tab?.isPlayingAudio ?? false
+                let isMuted = tab?.isMuted ?? false
+                cell.titleLabel.stringValue = title
+                cell.toolTip = entry.pinnedTitle
+                cell.updateFavicon(favicon)
+                cell.updateSleeping(isSleeping || !entry.isLive)
+                cell.updateLoading(isLoading)
+                cell.updateProgress(progress)
+                cell.updateAudio(isPlaying: isPlayingAudio, isMuted: isMuted)
+                cell.updatePinnedMode(entry: entry)
+                cell.indentLevel = depth
+                if isActive {
+                    cell.onClose = { [weak self] in
+                        guard let self else { return }
+                        let row = self.tableView.row(for: cell)
+                        guard row >= 0, case .pinnedItem(let idx) = self.sidebarRow(for: row) else { return }
+                        if case .entry(let e, _) = self.flattenedPinnedItems[idx] {
+                            if let pinnedIdx = self.pinnedEntries.firstIndex(where: { $0.id == e.id }) {
+                                self.delegate?.tabSidebar(self, didRequestClosePinnedTabAt: pinnedIdx)
+                            }
                         }
                     }
+                    cell.onToggleMute = { tab?.toggleMute() }
+                } else {
+                    cell.onClose = nil
+                    cell.onToggleMute = nil
                 }
                 return cell
             case .folder(let folder, let depth):
@@ -1310,7 +1342,7 @@ extension TabSidebarViewController: NSTableViewDelegate {
             guard tabIndex < tabsForTable.count else { return makeTabCell(tableView) }
             let tab = tabsForTable[tabIndex]
             let cell = makeTabCell(tableView)
-            configureTabCell(cell, tab: tab, title: tab.title, pinnedTab: nil, isActive: isActive) { [weak self] row in
+            configureTabCell(cell, tab: tab, title: tab.title, isActive: isActive) { [weak self] row in
                 guard let self, case .normalTab(let idx) = self.sidebarRow(for: row) else { return }
                 self.delegate?.tabSidebar(self, didRequestCloseTabAt: idx)
             }
@@ -1328,7 +1360,7 @@ extension TabSidebarViewController: NSTableViewDelegate {
         return cell
     }
 
-    private func configureTabCell(_ cell: TabCellView, tab: BrowserTab, title: String, pinnedTab: BrowserTab?, isActive: Bool, indentLevel: Int = 0, onClose: @escaping (Int) -> Void) {
+    private func configureTabCell(_ cell: TabCellView, tab: BrowserTab, title: String, isActive: Bool, indentLevel: Int = 0, onClose: @escaping (Int) -> Void) {
         cell.titleLabel.stringValue = title
         cell.toolTip = tab.title
         cell.updateFavicon(tab.favicon)
@@ -1336,7 +1368,7 @@ extension TabSidebarViewController: NSTableViewDelegate {
         cell.updateLoading(tab.isLoading)
         cell.updateProgress(tab.estimatedProgress)
         cell.updateAudio(isPlaying: tab.isPlayingAudio, isMuted: tab.isMuted)
-        cell.updatePinnedMode(tab: pinnedTab)
+        cell.updatePinnedMode(entry: nil)
         cell.indentLevel = indentLevel
         if isActive {
             cell.onClose = { [weak self] in
@@ -1416,8 +1448,8 @@ extension TabSidebarViewController: NSTableViewDelegate {
         case .pinnedItem(let index):
             guard index < flattenedPinnedItems.count else { break }
             switch flattenedPinnedItems[index] {
-            case .tab(let tab, _):
-                if let pinnedIdx = pinnedTabs.firstIndex(where: { $0.id == tab.id }) {
+            case .entry(let entry, _):
+                if let pinnedIdx = pinnedEntries.firstIndex(where: { $0.id == entry.id }) {
                     delegate?.tabSidebar(self, didSelectPinnedTabAt: pinnedIdx)
                 }
             case .folder(let folder, _):
@@ -1473,22 +1505,27 @@ extension TabSidebarViewController: NSMenuDelegate {
         contextMenuTabIsPinned = isPinned
         contextMenuFolderID = nil
 
-        // For pinned items, resolve the actual pinned tab index
-        let tab: BrowserTab
+        // For pinned items, resolve the actual pinned entry index
+        let tab: BrowserTab?
+        let entry: PinnedEntry?
         if isPinned {
-            if case .tab(let t, _) = flattenedPinnedItems[tabIndex] {
-                tab = t
-                contextMenuTabIndex = pinnedTabs.firstIndex(where: { $0.id == t.id }) ?? tabIndex
+            if case .entry(let e, _) = flattenedPinnedItems[tabIndex] {
+                entry = e
+                tab = e.tab
+                contextMenuTabIndex = pinnedEntries.firstIndex(where: { $0.id == e.id }) ?? tabIndex
             } else {
                 return
             }
         } else {
             tab = tabs[tabIndex]
+            entry = nil
         }
         let isSelectedTab = clickedRow == tableView.selectedRow
 
+        let tabURL = tab?.url ?? (isPinned ? entry?.pinnedURL : nil)
+
         // Copy URL / Copy Link
-        if tab.url != nil {
+        if tabURL != nil {
             let copyItem = NSMenuItem(
                 title: isSelectedTab ? "Copy URL" : "Copy Link",
                 action: #selector(contextMenuCopyURL(_:)),
@@ -1502,7 +1539,7 @@ extension TabSidebarViewController: NSMenuDelegate {
         }
 
         // Share submenu
-        if let url = tab.url {
+        if let url = tabURL {
             let picker = NSSharingServicePicker(items: [url])
             menu.addItem(picker.standardShareMenuItem)
         }
@@ -1510,7 +1547,7 @@ extension TabSidebarViewController: NSMenuDelegate {
         menu.addItem(.separator())
 
         // Duplicate
-        if tab.url != nil {
+        if tabURL != nil {
             let dupItem = NSMenuItem(title: "Duplicate", action: #selector(contextMenuDuplicate(_:)), keyEquivalent: "")
             dupItem.target = self
             menu.addItem(dupItem)
@@ -1546,7 +1583,7 @@ extension TabSidebarViewController: NSMenuDelegate {
                 unpinItem.target = self
                 menu.addItem(unpinItem)
             } else {
-                if tab.url != nil {
+                if tabURL != nil {
                     let pinItem = NSMenuItem(title: "Pin Tab", action: #selector(contextMenuPinTab(_:)), keyEquivalent: "")
                     pinItem.target = self
                     menu.addItem(pinItem)
@@ -1567,8 +1604,14 @@ extension TabSidebarViewController: NSMenuDelegate {
     }
 
     @objc private func contextMenuCopyURL(_ sender: NSMenuItem) {
-        let tab = contextMenuTabIsPinned ? pinnedTabs[contextMenuTabIndex] : tabs[contextMenuTabIndex]
-        guard let url = tab.url else { return }
+        let url: URL?
+        if contextMenuTabIsPinned {
+            let entry = pinnedEntries[contextMenuTabIndex]
+            url = entry.tab?.url ?? entry.pinnedURL
+        } else {
+            url = tabs[contextMenuTabIndex].url
+        }
+        guard let url else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url.absoluteString, forType: .string)
     }

@@ -5,7 +5,7 @@ import AppKit
 extension BrowserWindowController: TabStoreObserver {
     func tabStoreDidInsertTab(_ tab: BrowserTab, at index: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.applyState(pinnedTabs: space.pinnedTabs, pinnedFolders: space.pinnedFolders,
+        tabSidebar.applyState(pinnedEntries: space.pinnedEntries, pinnedFolders: space.pinnedFolders,
                               tabs: space.tabs, selectedTabID: selectedTabID)
 
         if sidebarItem.isCollapsed {
@@ -18,13 +18,13 @@ extension BrowserWindowController: TabStoreObserver {
         if tab.id == selectedTabID, window?.isKeyWindow == false {
             deselectAllTabs()
         }
-        tabSidebar.applyState(pinnedTabs: space.pinnedTabs, pinnedFolders: space.pinnedFolders,
+        tabSidebar.applyState(pinnedEntries: space.pinnedEntries, pinnedFolders: space.pinnedFolders,
                               tabs: space.tabs, selectedTabID: selectedTabID)
     }
 
     func tabStoreDidReorderTabs(in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.applyState(pinnedTabs: space.pinnedTabs, pinnedFolders: space.pinnedFolders,
+        tabSidebar.applyState(pinnedEntries: space.pinnedEntries, pinnedFolders: space.pinnedFolders,
                               tabs: space.tabs, selectedTabID: selectedTabID)
         if let selectedTabID, let index = currentTabs.firstIndex(where: { $0.id == selectedTabID }) {
             tabSidebar.selectedTabIndex = index
@@ -36,60 +36,55 @@ extension BrowserWindowController: TabStoreObserver {
         tabSidebar.reloadTab(at: index)
     }
 
-    // Pinned tab observer methods
+    // Pinned entry observer methods
 
-    func tabStoreDidInsertPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
+    func tabStoreDidInsertPinnedEntry(_ entry: PinnedEntry, at index: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.applyState(pinnedTabs: space.pinnedTabs, pinnedFolders: space.pinnedFolders,
+        tabSidebar.applyState(pinnedEntries: space.pinnedEntries, pinnedFolders: space.pinnedFolders,
                               tabs: space.tabs, selectedTabID: selectedTabID)
     }
 
-    func tabStoreDidRemovePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
+    func tabStoreDidRemovePinnedEntry(_ entry: PinnedEntry, at index: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
-        if tab.id == selectedTabID, window?.isKeyWindow == false {
+        if entry.tab?.id == selectedTabID, window?.isKeyWindow == false {
             deselectAllTabs()
         }
-        tabSidebar.applyState(pinnedTabs: space.pinnedTabs, pinnedFolders: space.pinnedFolders,
+        tabSidebar.applyState(pinnedEntries: space.pinnedEntries, pinnedFolders: space.pinnedFolders,
                               tabs: space.tabs, selectedTabID: selectedTabID)
     }
 
-    func tabStoreDidPinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space) {
+    func tabStoreDidPinTab(_ entry: PinnedEntry, fromIndex: Int, toIndex: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.applyState(pinnedTabs: space.pinnedTabs, pinnedFolders: space.pinnedFolders,
+        tabSidebar.applyState(pinnedEntries: space.pinnedEntries, pinnedFolders: space.pinnedFolders,
                               tabs: space.tabs, selectedTabID: selectedTabID)
     }
 
-    func tabStoreDidUnpinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space) {
+    func tabStoreDidUnpinTab(_ entry: PinnedEntry, fromIndex: Int, toIndex: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.applyState(pinnedTabs: space.pinnedTabs, pinnedFolders: space.pinnedFolders,
+        tabSidebar.applyState(pinnedEntries: space.pinnedEntries, pinnedFolders: space.pinnedFolders,
                               tabs: space.tabs, selectedTabID: selectedTabID)
     }
 
-    func tabStoreDidReorderPinnedTabs(in space: Space) {
+    func tabStoreDidReorderPinnedEntries(in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.applyState(pinnedTabs: space.pinnedTabs, pinnedFolders: space.pinnedFolders,
+        tabSidebar.applyState(pinnedEntries: space.pinnedEntries, pinnedFolders: space.pinnedFolders,
                               tabs: space.tabs, selectedTabID: selectedTabID)
-        if let selectedTabID, let index = space.pinnedTabs.firstIndex(where: { $0.id == selectedTabID }) {
+        if let selectedTabID, let index = space.pinnedEntries.firstIndex(where: { $0.tab?.id == selectedTabID }) {
             tabSidebar.selectedPinnedTabIndex = index
         }
     }
 
-    func tabStoreDidUpdatePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
+    func tabStoreDidUpdatePinnedEntry(_ entry: PinnedEntry, at index: Int, in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.reloadPinnedTab(at: index)
-    }
-
-    func tabStoreDidResetPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {
-        guard space.id == activeSpaceID else { return }
-        tabSidebar.reloadPinnedTab(at: index)
+        tabSidebar.reloadPinnedEntry(at: index)
     }
 
     func tabStoreDidUpdatePinnedFolders(in space: Space) {
         guard space.id == activeSpaceID else { return }
-        tabSidebar.applyState(pinnedTabs: space.pinnedTabs, pinnedFolders: space.pinnedFolders,
+        tabSidebar.applyState(pinnedEntries: space.pinnedEntries, pinnedFolders: space.pinnedFolders,
                               tabs: space.tabs, selectedTabID: selectedTabID)
         // Restore selection after animation
-        if let selectedTabID, let index = space.pinnedTabs.firstIndex(where: { $0.id == selectedTabID }) {
+        if let selectedTabID, let index = space.pinnedEntries.firstIndex(where: { $0.tab?.id == selectedTabID }) {
             tabSidebar.selectedPinnedTabIndex = index
         } else if let selectedTabID, let index = currentTabs.firstIndex(where: { $0.id == selectedTabID }) {
             tabSidebar.selectedTabIndex = index

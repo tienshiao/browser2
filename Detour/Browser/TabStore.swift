@@ -10,16 +10,15 @@ protocol TabStoreObserver: AnyObject {
     func tabStoreDidUpdateTab(_ tab: BrowserTab, at index: Int, in space: Space)
     func tabStoreDidUpdateSpaces()
 
-    // Pinned tab observer methods
-    func tabStoreDidInsertPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space)
-    func tabStoreDidRemovePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space)
-    func tabStoreDidReorderPinnedTabs(in space: Space)
-    func tabStoreDidUpdatePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space)
-    func tabStoreDidResetPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space)
+    // Pinned entry observer methods
+    func tabStoreDidInsertPinnedEntry(_ entry: PinnedEntry, at index: Int, in space: Space)
+    func tabStoreDidRemovePinnedEntry(_ entry: PinnedEntry, at index: Int, in space: Space)
+    func tabStoreDidReorderPinnedEntries(in space: Space)
+    func tabStoreDidUpdatePinnedEntry(_ entry: PinnedEntry, at index: Int, in space: Space)
 
     // Pin/unpin atomic notifications
-    func tabStoreDidPinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space)
-    func tabStoreDidUnpinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space)
+    func tabStoreDidPinTab(_ entry: PinnedEntry, fromIndex: Int, toIndex: Int, in space: Space)
+    func tabStoreDidUnpinTab(_ entry: PinnedEntry, fromIndex: Int, toIndex: Int, in space: Space)
 
     // Pinned folder notifications
     func tabStoreDidUpdatePinnedFolders(in space: Space)
@@ -31,13 +30,12 @@ extension TabStoreObserver {
     func tabStoreDidReorderTabs(in space: Space) {}
     func tabStoreDidUpdateTab(_ tab: BrowserTab, at index: Int, in space: Space) {}
     func tabStoreDidUpdateSpaces() {}
-    func tabStoreDidInsertPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {}
-    func tabStoreDidRemovePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {}
-    func tabStoreDidReorderPinnedTabs(in space: Space) {}
-    func tabStoreDidUpdatePinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {}
-    func tabStoreDidResetPinnedTab(_ tab: BrowserTab, at index: Int, in space: Space) {}
-    func tabStoreDidPinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space) {}
-    func tabStoreDidUnpinTab(_ tab: BrowserTab, fromIndex: Int, toIndex: Int, in space: Space) {}
+    func tabStoreDidInsertPinnedEntry(_ entry: PinnedEntry, at index: Int, in space: Space) {}
+    func tabStoreDidRemovePinnedEntry(_ entry: PinnedEntry, at index: Int, in space: Space) {}
+    func tabStoreDidReorderPinnedEntries(in space: Space) {}
+    func tabStoreDidUpdatePinnedEntry(_ entry: PinnedEntry, at index: Int, in space: Space) {}
+    func tabStoreDidPinTab(_ entry: PinnedEntry, fromIndex: Int, toIndex: Int, in space: Space) {}
+    func tabStoreDidUnpinTab(_ entry: PinnedEntry, fromIndex: Int, toIndex: Int, in space: Space) {}
     func tabStoreDidUpdatePinnedFolders(in space: Space) {}
 }
 
@@ -49,7 +47,7 @@ class Space {
     var emoji: String
     var colorHex: String
     var tabs: [BrowserTab] = []
-    var pinnedTabs: [BrowserTab] = []
+    var pinnedEntries: [PinnedEntry] = []
     var pinnedFolders: [PinnedFolder] = []
     var selectedTabID: UUID?
     var profileID: UUID
@@ -241,6 +239,26 @@ class TabStore {
                     peekInteractionState: tab.peekInteractionState
                 ))
             }
+
+            // Also save backing tabs for live pinned entries (FK from pinnedTab.tabID → tab.id)
+            for entry in space.pinnedEntries {
+                guard let tab = entry.tab else { continue }
+                let stateData = tab.currentInteractionStateData()
+                tabRecords.append(TabRecord(
+                    id: tab.id.uuidString,
+                    spaceID: space.id.uuidString,
+                    url: tab.url?.absoluteString,
+                    title: tab.title,
+                    faviconURL: tab.faviconURL?.absoluteString,
+                    interactionState: stateData,
+                    sortOrder: -1,  // Convention for backing tabs
+                    lastDeselectedAt: tab.lastDeselectedAt?.timeIntervalSince1970,
+                    parentID: tab.parentID?.uuidString,
+                    peekURL: tab.peekURL?.absoluteString,
+                    peekInteractionState: tab.peekInteractionState
+                ))
+            }
+
             sessionData.append((spaceRecord, tabRecords))
         }
 
@@ -249,7 +267,7 @@ class TabStore {
             lastActiveSpaceID: lastActiveSpaceID?.uuidString
         )
 
-        // Save pinned folders and tabs together in one transaction (tabs FK → folders)
+        // Save pinned folders and entries together in one transaction (entries FK → folders)
         for space in persistentSpaces {
             var folderRecords: [PinnedFolderRecord] = []
             for folder in space.pinnedFolders {
@@ -264,21 +282,16 @@ class TabStore {
             }
 
             var pinnedRecords: [PinnedTabRecord] = []
-            for tab in space.pinnedTabs {
-                let stateData = tab.currentInteractionStateData()
+            for entry in space.pinnedEntries {
                 pinnedRecords.append(PinnedTabRecord(
-                    id: tab.id.uuidString,
+                    id: entry.id.uuidString,
                     spaceID: space.id.uuidString,
-                    pinnedURL: tab.pinnedURL?.absoluteString ?? "",
-                    pinnedTitle: tab.pinnedTitle ?? tab.title,
-                    url: tab.url?.absoluteString,
-                    title: tab.title,
-                    faviconURL: tab.faviconURL?.absoluteString,
-                    interactionState: stateData,
-                    sortOrder: tab.pinnedSortOrder ?? 0,
-                    folderID: tab.folderID?.uuidString,
-                    peekURL: tab.peekURL?.absoluteString,
-                    peekInteractionState: tab.peekInteractionState
+                    pinnedURL: entry.pinnedURL.absoluteString,
+                    pinnedTitle: entry.pinnedTitle,
+                    faviconURL: entry.faviconURL?.absoluteString,
+                    sortOrder: entry.sortOrder,
+                    folderID: entry.folderID?.uuidString,
+                    tabID: entry.tab?.id.uuidString
                 ))
             }
 
@@ -316,8 +329,14 @@ class TabStore {
                 space.selectedTabID = UUID(uuidString: selID)
             }
 
+            // Identify backing tab IDs (referenced by pinned entries)
+            let pinnedRecords = appDB.loadPinnedTabs(spaceID: spaceRecord.id)
+            let backingTabIDs = Set(pinnedRecords.compactMap(\.tabID))
+
+            // Load normal tabs (exclude backing tabs, which are identified by FK)
             for tabRecord in tabRecords {
                 guard let tabID = UUID(uuidString: tabRecord.id) else { continue }
+                guard !backingTabIDs.contains(tabRecord.id) else { continue }
                 let isSelected = space.selectedTabID == tabID
                 let tab: BrowserTab
                 if isSelected {
@@ -362,41 +381,54 @@ class TabStore {
                 space.pinnedFolders.append(folder)
             }
 
-            // Load pinned tabs
-            let pinnedRecords = appDB.loadPinnedTabs(spaceID: spaceRecord.id)
+            // Build a lookup for tab records by ID (for matching backing tabs to pinned entries)
+            let tabRecordsByID = Dictionary(tabRecords.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
             for pinnedRecord in pinnedRecords {
-                guard let tabID = UUID(uuidString: pinnedRecord.id) else { continue }
-                let isSelected = space.selectedTabID == tabID
-                let tab: BrowserTab
-                if isSelected {
-                    tab = BrowserTab(
-                        id: tabID,
-                        title: pinnedRecord.title ?? pinnedRecord.pinnedTitle,
-                        archivedInteractionState: pinnedRecord.interactionState,
-                        fallbackURL: pinnedRecord.url.flatMap { URL(string: $0) } ?? URL(string: pinnedRecord.pinnedURL),
-                        faviconURL: pinnedRecord.faviconURL.flatMap { URL(string: $0) },
-                        configuration: space.makeWebViewConfiguration()
-                    )
-                } else {
-                    tab = BrowserTab(
-                        id: tabID,
-                        title: pinnedRecord.title ?? pinnedRecord.pinnedTitle,
-                        url: pinnedRecord.url.flatMap { URL(string: $0) } ?? URL(string: pinnedRecord.pinnedURL),
-                        faviconURL: pinnedRecord.faviconURL.flatMap { URL(string: $0) },
-                        cachedInteractionState: pinnedRecord.interactionState,
-                        spaceID: spaceID
-                    )
+                guard let entryID = UUID(uuidString: pinnedRecord.id) else { continue }
+                let pinnedURL = URL(string: pinnedRecord.pinnedURL) ?? URL(string: "about:blank")!
+
+                var backingTab: BrowserTab? = nil
+                if let backingTabIDStr = pinnedRecord.tabID,
+                   let backingTabID = UUID(uuidString: backingTabIDStr),
+                   let tabRecord = tabRecordsByID[backingTabIDStr] {
+                    let isSelected = space.selectedTabID == backingTabID
+                    if isSelected {
+                        backingTab = BrowserTab(
+                            id: backingTabID,
+                            title: tabRecord.title,
+                            archivedInteractionState: tabRecord.interactionState,
+                            fallbackURL: tabRecord.url.flatMap { URL(string: $0) } ?? pinnedURL,
+                            faviconURL: tabRecord.faviconURL.flatMap { URL(string: $0) },
+                            configuration: space.makeWebViewConfiguration()
+                        )
+                    } else {
+                        backingTab = BrowserTab(
+                            id: backingTabID,
+                            title: tabRecord.title,
+                            url: tabRecord.url.flatMap { URL(string: $0) } ?? pinnedURL,
+                            faviconURL: tabRecord.faviconURL.flatMap { URL(string: $0) },
+                            cachedInteractionState: tabRecord.interactionState,
+                            spaceID: spaceID
+                        )
+                    }
+                    backingTab?.spaceID = spaceID
+                    backingTab?.peekURL = tabRecord.peekURL.flatMap { URL(string: $0) }
+                    backingTab?.peekInteractionState = tabRecord.peekInteractionState
+                    if let tab = backingTab {
+                        self.subscribeToTab(tab, spaceID: spaceID)
+                    }
                 }
-                tab.isPinned = true
-                tab.pinnedURL = URL(string: pinnedRecord.pinnedURL)
-                tab.pinnedTitle = pinnedRecord.pinnedTitle
-                tab.folderID = pinnedRecord.folderID.flatMap { UUID(uuidString: $0) }
-                tab.pinnedSortOrder = pinnedRecord.sortOrder
-                tab.spaceID = spaceID
-                tab.peekURL = pinnedRecord.peekURL.flatMap { URL(string: $0) }
-                tab.peekInteractionState = pinnedRecord.peekInteractionState
-                space.pinnedTabs.append(tab)
-                self.subscribeToTab(tab, spaceID: spaceID)
+
+                let entry = PinnedEntry(
+                    id: entryID,
+                    pinnedURL: pinnedURL,
+                    pinnedTitle: pinnedRecord.pinnedTitle,
+                    faviconURL: pinnedRecord.faviconURL.flatMap { URL(string: $0) },
+                    folderID: pinnedRecord.folderID.flatMap { UUID(uuidString: $0) },
+                    sortOrder: pinnedRecord.sortOrder,
+                    tab: backingTab
+                )
+                space.pinnedEntries.append(entry)
             }
 
             self.spaces.append(space)
@@ -480,8 +512,10 @@ class TabStore {
         for tab in space.tabs {
             tabSubscriptions.removeValue(forKey: tab.id)
         }
-        for tab in space.pinnedTabs {
-            tabSubscriptions.removeValue(forKey: tab.id)
+        for entry in space.pinnedEntries {
+            if let tab = entry.tab {
+                tabSubscriptions.removeValue(forKey: tab.id)
+            }
         }
         // Clean up closed tab records for this space
         let spaceIDString = id.uuidString
@@ -554,6 +588,11 @@ class TabStore {
         for tab in space.tabs {
             tabSubscriptions.removeValue(forKey: tab.id)
         }
+        for entry in space.pinnedEntries {
+            if let tab = entry.tab {
+                tabSubscriptions.removeValue(forKey: tab.id)
+            }
+        }
         // Keep the built-in incognito profile — it persists across sessions
         notifyObservers { $0.tabStoreDidUpdateSpaces() }
     }
@@ -566,7 +605,7 @@ class TabStore {
         tab.parentID = parentID
 
         let existingTabs = space.tabs.map { (id: $0.id, parentID: $0.parentID) }
-        let pinnedTabIDs = Set(space.pinnedTabs.map(\.id))
+        let pinnedTabIDs = Set(space.pinnedEntries.compactMap { $0.tab?.id })
         let insertionIndex = tabInsertionIndex(
             parentID: parentID,
             existingTabs: existingTabs,
@@ -642,45 +681,87 @@ class TabStore {
     func pinTab(id: UUID, in space: Space, at destinationIndex: Int? = nil) {
         guard let index = space.tabs.firstIndex(where: { $0.id == id }) else { return }
         let tab = space.tabs.remove(at: index)
-        tab.isPinned = true
-        tab.pinnedURL = tab.url
-        tab.pinnedTitle = tab.title
-        let maxTabOrder = space.pinnedTabs.compactMap(\.pinnedSortOrder).max() ?? -1
+        let maxEntryOrder = space.pinnedEntries.map(\.sortOrder).max() ?? -1
         let maxFolderOrder = space.pinnedFolders.map(\.sortOrder).max() ?? -1
-        tab.pinnedSortOrder = max(maxTabOrder, maxFolderOrder) + 1
-        let insertAt = min(destinationIndex ?? space.pinnedTabs.count, space.pinnedTabs.count)
-        space.pinnedTabs.insert(tab, at: insertAt)
-        notifyObservers { $0.tabStoreDidPinTab(tab, fromIndex: index, toIndex: insertAt, in: space) }
+        let entry = PinnedEntry(
+            pinnedURL: tab.url ?? URL(string: "about:blank")!,
+            pinnedTitle: tab.title,
+            faviconURL: tab.faviconURL,
+            sortOrder: max(maxEntryOrder, maxFolderOrder) + 1,
+            tab: tab
+        )
+        let insertAt = min(destinationIndex ?? space.pinnedEntries.count, space.pinnedEntries.count)
+        space.pinnedEntries.insert(entry, at: insertAt)
+        notifyObservers { $0.tabStoreDidPinTab(entry, fromIndex: index, toIndex: insertAt, in: space) }
         scheduleSave()
     }
 
     func unpinTab(id: UUID, in space: Space, at destinationIndex: Int? = nil) {
-        guard let index = space.pinnedTabs.firstIndex(where: { $0.id == id }) else { return }
-        let tab = space.pinnedTabs.remove(at: index)
-        tab.isPinned = false
-        tab.pinnedURL = nil
-        tab.pinnedTitle = nil
-        tab.folderID = nil
-        tab.pinnedSortOrder = nil
+        guard let index = space.pinnedEntries.firstIndex(where: { $0.id == id }) else { return }
+        let entry = space.pinnedEntries.remove(at: index)
+        let tab: BrowserTab
+        if let liveTab = entry.tab {
+            tab = liveTab
+        } else {
+            // Dormant — create a new tab loading the pinned URL
+            tab = BrowserTab(
+                id: UUID(),
+                title: entry.pinnedTitle,
+                archivedInteractionState: nil,
+                fallbackURL: entry.pinnedURL,
+                faviconURL: entry.faviconURL,
+                configuration: space.makeWebViewConfiguration()
+            )
+            tab.spaceID = space.id
+            subscribeToTab(tab, spaceID: space.id)
+        }
         let insertAt = min(destinationIndex ?? 0, space.tabs.count)
         space.tabs.insert(tab, at: insertAt)
-        notifyObservers { $0.tabStoreDidUnpinTab(tab, fromIndex: index, toIndex: insertAt, in: space) }
+        notifyObservers { $0.tabStoreDidUnpinTab(entry, fromIndex: index, toIndex: insertAt, in: space) }
         scheduleSave()
     }
 
     func closePinnedTab(id: UUID, in space: Space) {
-        guard let index = space.pinnedTabs.firstIndex(where: { $0.id == id }) else { return }
-        let tab = space.pinnedTabs[index]
-        if tab.isAtPinnedHome {
-            // Fully remove
+        guard let index = space.pinnedEntries.firstIndex(where: { $0.id == id }) else { return }
+        let entry = space.pinnedEntries[index]
+        // Cache favicon before discarding tab
+        if let tab = entry.tab {
+            if let url = tab.faviconURL { entry.faviconURL = url }
+            if let image = tab.favicon { entry.favicon = image }
             tabSubscriptions.removeValue(forKey: tab.id)
-            space.pinnedTabs.remove(at: index)
-            notifyObservers { $0.tabStoreDidRemovePinnedTab(tab, at: index, in: space) }
-        } else {
-            // Reset to pinned home
-            tab.resetToPinnedHome()
-            notifyObservers { $0.tabStoreDidResetPinnedTab(tab, at: index, in: space) }
         }
+        entry.tab = nil  // Always make dormant, never remove entry
+        notifyObservers { $0.tabStoreDidUpdatePinnedEntry(entry, at: index, in: space) }
+        scheduleSave()
+    }
+
+    func deletePinnedEntry(id: UUID, in space: Space) {
+        guard let index = space.pinnedEntries.firstIndex(where: { $0.id == id }) else { return }
+        let entry = space.pinnedEntries[index]
+        if let tab = entry.tab {
+            tabSubscriptions.removeValue(forKey: tab.id)
+        }
+        space.pinnedEntries.remove(at: index)
+        notifyObservers { $0.tabStoreDidRemovePinnedEntry(entry, at: index, in: space) }
+        scheduleSave()
+    }
+
+    func activatePinnedEntry(id: UUID, in space: Space) {
+        guard let index = space.pinnedEntries.firstIndex(where: { $0.id == id }) else { return }
+        let entry = space.pinnedEntries[index]
+        guard entry.tab == nil else { return }  // Already live
+        let tab = BrowserTab(
+            id: UUID(),
+            title: entry.pinnedTitle,
+            archivedInteractionState: nil,
+            fallbackURL: entry.pinnedURL,
+            faviconURL: entry.faviconURL,
+            configuration: space.makeWebViewConfiguration()
+        )
+        tab.spaceID = space.id
+        entry.tab = tab
+        subscribeToTab(tab, spaceID: space.id)
+        notifyObservers { $0.tabStoreDidUpdatePinnedEntry(entry, at: index, in: space) }
         scheduleSave()
     }
 
@@ -689,7 +770,7 @@ class TabStore {
     @discardableResult
     func addPinnedFolder(name: String, parentFolderID: UUID? = nil, in space: Space) -> PinnedFolder {
         let maxFolderOrder = space.pinnedFolders.map(\.sortOrder).max() ?? -1
-        let maxTabOrder = space.pinnedTabs.compactMap(\.pinnedSortOrder).max() ?? -1
+        let maxTabOrder = space.pinnedEntries.map(\.sortOrder).max() ?? -1
         let folder = PinnedFolder(name: name, parentFolderID: parentFolderID, sortOrder: max(maxFolderOrder, maxTabOrder) + 1)
         space.pinnedFolders.append(folder)
         notifyObservers { $0.tabStoreDidUpdatePinnedFolders(in: space) }
@@ -701,9 +782,9 @@ class TabStore {
         guard let folder = space.pinnedFolders.first(where: { $0.id == id }) else { return }
         let parentID = folder.parentFolderID
 
-        // Reparent direct children (tabs and folders) to the deleted folder's parent
-        for tab in space.pinnedTabs where tab.folderID == id {
-            tab.folderID = parentID
+        // Reparent direct children (entries and folders) to the deleted folder's parent
+        for entry in space.pinnedEntries where entry.folderID == id {
+            entry.folderID = parentID
         }
         for child in space.pinnedFolders where child.parentFolderID == id {
             child.parentFolderID = parentID
@@ -729,28 +810,28 @@ class TabStore {
     }
 
     func movePinnedTabToFolder(tabID: UUID, folderID: UUID?, beforeItemID: UUID? = nil, in space: Space) {
-        guard let tab = space.pinnedTabs.first(where: { $0.id == tabID }) else { return }
-        tab.folderID = folderID
+        guard let entry = space.pinnedEntries.first(where: { $0.id == tabID }) else { return }
+        entry.folderID = folderID
 
-        // Collect all sibling items (tabs + folders) at the target level, excluding the moved tab
+        // Collect all sibling items (entries + folders) at the target level, excluding the moved entry
         struct SiblingItem {
             let id: UUID
             let sortOrder: Int
-            enum Kind { case tab(BrowserTab), folder(PinnedFolder) }
+            enum Kind { case entry(PinnedEntry), folder(PinnedFolder) }
             let kind: Kind
         }
 
         var siblings: [SiblingItem] = []
-        for t in space.pinnedTabs where t.folderID == folderID && t.id != tabID {
-            siblings.append(SiblingItem(id: t.id, sortOrder: t.pinnedSortOrder ?? 0, kind: .tab(t)))
+        for e in space.pinnedEntries where e.folderID == folderID && e.id != tabID {
+            siblings.append(SiblingItem(id: e.id, sortOrder: e.sortOrder, kind: .entry(e)))
         }
         for f in space.pinnedFolders where f.parentFolderID == folderID {
             siblings.append(SiblingItem(id: f.id, sortOrder: f.sortOrder, kind: .folder(f)))
         }
         siblings.sort { $0.sortOrder < $1.sortOrder }
 
-        // Insert the moved tab at the right position
-        let movedItem = SiblingItem(id: tab.id, sortOrder: 0, kind: .tab(tab))
+        // Insert the moved entry at the right position
+        let movedItem = SiblingItem(id: entry.id, sortOrder: 0, kind: .entry(entry))
         if let beforeItemID, let insertionPoint = siblings.firstIndex(where: { $0.id == beforeItemID }) {
             siblings.insert(movedItem, at: insertionPoint)
         } else {
@@ -760,7 +841,7 @@ class TabStore {
         // Renumber all siblings
         for (i, sibling) in siblings.enumerated() {
             switch sibling.kind {
-            case .tab(let t): t.pinnedSortOrder = i
+            case .entry(let e): e.sortOrder = i
             case .folder(let f): f.sortOrder = i
             }
         }
@@ -777,13 +858,13 @@ class TabStore {
         struct SiblingItem {
             let id: UUID
             let sortOrder: Int
-            enum Kind { case tab(BrowserTab), folder(PinnedFolder) }
+            enum Kind { case entry(PinnedEntry), folder(PinnedFolder) }
             let kind: Kind
         }
 
         var siblings: [SiblingItem] = []
-        for t in space.pinnedTabs where t.folderID == parentFolderID {
-            siblings.append(SiblingItem(id: t.id, sortOrder: t.pinnedSortOrder ?? 0, kind: .tab(t)))
+        for e in space.pinnedEntries where e.folderID == parentFolderID {
+            siblings.append(SiblingItem(id: e.id, sortOrder: e.sortOrder, kind: .entry(e)))
         }
         for f in space.pinnedFolders where f.parentFolderID == parentFolderID && f.id != folderID {
             siblings.append(SiblingItem(id: f.id, sortOrder: f.sortOrder, kind: .folder(f)))
@@ -799,7 +880,7 @@ class TabStore {
 
         for (i, sibling) in siblings.enumerated() {
             switch sibling.kind {
-            case .tab(let t): t.pinnedSortOrder = i
+            case .entry(let e): e.sortOrder = i
             case .folder(let f): f.sortOrder = i
             }
         }
@@ -859,8 +940,9 @@ class TabStore {
             let threshold = space.profile?.sleepThreshold ?? .oneHour
             guard threshold != .never else { continue }
             let cutoff = Date().addingTimeInterval(-threshold.rawValue)
-            for tab in space.tabs + space.pinnedTabs {
-                guard !tab.isSleeping, !tab.isPinned, !tab.isPlayingAudio,
+            let pinnedTabIDs = Set(space.pinnedEntries.compactMap { $0.tab?.id })
+            for tab in space.tabs {
+                guard !tab.isSleeping, !pinnedTabIDs.contains(tab.id), !tab.isPlayingAudio,
                       let lastDeselected = tab.lastDeselectedAt,
                       lastDeselected < cutoff else { continue }
                 tab.sleep()
@@ -900,8 +982,8 @@ class TabStore {
         let notify: (BrowserTab) -> Void = { [weak self] tab in
             guard let self else { return }
             for space in self.spaces {
-                if let index = space.pinnedTabs.firstIndex(where: { $0.id == tab.id }) {
-                    self.notifyObservers { $0.tabStoreDidUpdatePinnedTab(tab, at: index, in: space) }
+                if let index = space.pinnedEntries.firstIndex(where: { $0.tab?.id == tab.id }) {
+                    self.notifyObservers { $0.tabStoreDidUpdatePinnedEntry(space.pinnedEntries[index], at: index, in: space) }
                     return
                 }
                 if let index = space.tabs.firstIndex(where: { $0.id == tab.id }) {

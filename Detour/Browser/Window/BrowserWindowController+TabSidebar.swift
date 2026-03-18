@@ -41,18 +41,33 @@ extension BrowserWindowController: TabSidebarDelegate {
     }
 
     func tabSidebar(_ sidebar: TabSidebarViewController, didSelectPinnedTabAt index: Int) {
-        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
-        selectTab(id: space.pinnedTabs[index].id)
+        guard let space = activeSpace, index >= 0, index < space.pinnedEntries.count else { return }
+        let entry = space.pinnedEntries[index]
+        if let tab = entry.tab {
+            selectTab(id: tab.id)
+        } else {
+            // Dormant — delete the pinned entry
+            let entryID = entry.id
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let space = self.activeSpace else { return }
+                self.store.deletePinnedEntry(id: entryID, in: space)
+            }
+        }
     }
 
     func tabSidebar(_ sidebar: TabSidebarViewController, didRequestClosePinnedTabAt index: Int) {
-        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
-        let tab = space.pinnedTabs[index]
-        let wasSelected = tab.id == selectedTabID
-        if wasSelected {
-            closePinnedTab(at: index)
+        guard let space = activeSpace, index >= 0, index < space.pinnedEntries.count else { return }
+        let entry = space.pinnedEntries[index]
+        if entry.tab == nil {
+            // Dormant — delete the entry entirely
+            store.deletePinnedEntry(id: entry.id, in: space)
         } else {
-            store.closePinnedTab(id: tab.id, in: space)
+            let wasSelected = entry.tab?.id == selectedTabID
+            if wasSelected {
+                closePinnedTab(at: index)
+            } else {
+                store.closePinnedTab(id: entry.id, in: space)
+            }
         }
     }
 
@@ -70,8 +85,8 @@ extension BrowserWindowController: TabSidebarDelegate {
     }
 
     func tabSidebar(_ sidebar: TabSidebarViewController, didDragPinnedTabToUnpinAt index: Int, destinationIndex: Int) {
-        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
-        store.unpinTab(id: space.pinnedTabs[index].id, in: space, at: destinationIndex)
+        guard let space = activeSpace, index >= 0, index < space.pinnedEntries.count else { return }
+        store.unpinTab(id: space.pinnedEntries[index].id, in: space, at: destinationIndex)
     }
 
     func tabSidebarDidRequestSwitchToSpace(_ sidebar: TabSidebarViewController, spaceID: UUID) {
@@ -122,26 +137,44 @@ extension BrowserWindowController: TabSidebarDelegate {
 
     func tabSidebar(_ sidebar: TabSidebarViewController, didRequestDuplicateTabAt index: Int, isPinned: Bool) {
         guard let space = activeSpace else { return }
-        let tabs = isPinned ? space.pinnedTabs : space.tabs
-        guard index >= 0, index < tabs.count, let url = tabs[index].url else { return }
+        let url: URL?
+        if isPinned {
+            guard index >= 0, index < space.pinnedEntries.count else { return }
+            let entry = space.pinnedEntries[index]
+            url = entry.tab?.url ?? entry.pinnedURL
+        } else {
+            guard index >= 0, index < space.tabs.count else { return }
+            url = space.tabs[index].url
+        }
+        guard let url else { return }
         let newTab = store.addTab(in: space, url: url)
         selectTab(id: newTab.id)
     }
 
     func tabSidebar(_ sidebar: TabSidebarViewController, didRequestMoveTabAt index: Int, isPinned: Bool, toSpaceID: UUID) {
         guard let srcSpace = activeSpace, let dstSpace = store.space(withID: toSpaceID) else { return }
-        let tabs = isPinned ? srcSpace.pinnedTabs : srcSpace.tabs
-        guard index >= 0, index < tabs.count else { return }
-        let tab = tabs[index]
-        guard let url = tab.url else { return }
+        let url: URL?
+        let entryOrTabID: UUID
         if isPinned {
-            store.closePinnedTab(id: tab.id, in: srcSpace)
+            guard index >= 0, index < srcSpace.pinnedEntries.count else { return }
+            let entry = srcSpace.pinnedEntries[index]
+            url = entry.tab?.url ?? entry.pinnedURL
+            entryOrTabID = entry.id
         } else {
-            let wasSelected = tab.id == selectedTabID
+            guard index >= 0, index < srcSpace.tabs.count else { return }
+            let tab = srcSpace.tabs[index]
+            url = tab.url
+            entryOrTabID = tab.id
+        }
+        guard let url else { return }
+        if isPinned {
+            store.closePinnedTab(id: entryOrTabID, in: srcSpace)
+        } else {
+            let wasSelected = entryOrTabID == selectedTabID
             if wasSelected {
                 closeTab(at: index, wasSelected: true)
             } else {
-                store.closeTab(id: tab.id, in: srcSpace)
+                store.closeTab(id: entryOrTabID, in: srcSpace)
             }
         }
         store.addTab(in: dstSpace, url: url)
@@ -178,8 +211,8 @@ extension BrowserWindowController: TabSidebarDelegate {
     }
 
     func tabSidebar(_ sidebar: TabSidebarViewController, didRequestUnpinTabAt index: Int) {
-        guard let space = activeSpace, index >= 0, index < space.pinnedTabs.count else { return }
-        store.unpinTab(id: space.pinnedTabs[index].id, in: space)
+        guard let space = activeSpace, index >= 0, index < space.pinnedEntries.count else { return }
+        store.unpinTab(id: space.pinnedEntries[index].id, in: space)
     }
 
     func tabSidebarSpacesForContextMenu(_ sidebar: TabSidebarViewController) -> [(id: UUID, name: String, emoji: String, isCurrent: Bool)] {
@@ -221,7 +254,7 @@ extension BrowserWindowController: TabSidebarDelegate {
     func tabSidebarDidRequestDeleteSpace(_ sidebar: TabSidebarViewController, spaceID: UUID) {
         guard let space = store.space(withID: spaceID) else { return }
 
-        if !space.tabs.isEmpty || !space.pinnedTabs.isEmpty {
+        if !space.tabs.isEmpty || !space.pinnedEntries.isEmpty {
             let alert = NSAlert()
             alert.messageText = "Cannot Delete Space"
             alert.informativeText = "Close or move all tabs first before deleting this space."

@@ -91,29 +91,28 @@ final class SidebarLayoutTests: XCTestCase {
 
     // MARK: - diffSidebarState
 
-    private func makeTab(id: UUID = UUID(), title: String = "Tab", folderID: UUID? = nil, sortOrder: Int = 0) -> BrowserTab {
-        let tab = BrowserTab(id: id, title: title, url: URL(string: "https://example.com"), faviconURL: nil, cachedInteractionState: nil, spaceID: UUID())
-        tab.isPinned = true
-        tab.pinnedTitle = title
-        tab.pinnedURL = URL(string: "https://example.com")
-        tab.folderID = folderID
-        tab.pinnedSortOrder = sortOrder
-        return tab
+    private func makeEntry(id: UUID = UUID(), title: String = "Entry", folderID: UUID? = nil, sortOrder: Int = 0) -> PinnedEntry {
+        PinnedEntry(id: id, pinnedURL: URL(string: "https://example.com")!, pinnedTitle: title, folderID: folderID, sortOrder: sortOrder)
+    }
+
+    private func makeTab(id: UUID = UUID()) -> BrowserTab {
+        BrowserTab(id: id, title: "Tab", url: URL(string: "https://example.com"), faviconURL: nil, cachedInteractionState: nil, spaceID: UUID())
     }
 
     private func makeFolder(id: UUID = UUID(), name: String = "Folder", parentID: UUID? = nil, isCollapsed: Bool = false, sortOrder: Int = 0) -> PinnedFolder {
         PinnedFolder(id: id, name: name, parentFolderID: parentID, isCollapsed: isCollapsed, sortOrder: sortOrder)
     }
 
-    private func flatItems(_ tabs: [BrowserTab] = [], folders: [PinnedFolder] = [],
+    private func flatItems(_ entries: [PinnedEntry] = [], folders: [PinnedFolder] = [],
                            collapsed: Set<UUID> = [], selectedTabID: UUID? = nil) -> [PinnedItem] {
-        flattenPinnedTree(tabs: tabs, folders: folders, collapsedFolderIDs: collapsed, selectedTabID: selectedTabID)
+        flattenPinnedTree(entries: entries, folders: folders, collapsedFolderIDs: collapsed, selectedTabID: selectedTabID)
     }
 
     func testDiffNoChanges() {
-        let t1 = makeTab(title: "A", sortOrder: 0)
-        let t2 = makeTab(title: "B", sortOrder: 1)
-        let items = flatItems([t1, t2])
+        let e1 = makeEntry(title: "A", sortOrder: 0)
+        let e2 = makeEntry(title: "B", sortOrder: 1)
+        let t1 = makeTab()
+        let items = flatItems([e1, e2])
         let diff = diffSidebarState(oldPinnedItems: items, newPinnedItems: items,
                                      oldTabs: [t1], newTabs: [t1])
         XCTAssertFalse(diff.hasChanges)
@@ -142,8 +141,8 @@ final class SidebarLayoutTests: XCTestCase {
     func testDiffExpandFolder() {
         let folderID = UUID()
         let folder = makeFolder(id: folderID, name: "Work", sortOrder: 0)
-        let child1 = makeTab(title: "A", folderID: folderID, sortOrder: 1)
-        let child2 = makeTab(title: "B", folderID: folderID, sortOrder: 2)
+        let child1 = makeEntry(title: "A", folderID: folderID, sortOrder: 1)
+        let child2 = makeEntry(title: "B", folderID: folderID, sortOrder: 2)
 
         let collapsed = flatItems([child1, child2], folders: [folder], collapsed: [folderID])
         let expanded = flatItems([child1, child2], folders: [folder])
@@ -158,8 +157,8 @@ final class SidebarLayoutTests: XCTestCase {
     func testDiffCollapseFolder() {
         let folderID = UUID()
         let folder = makeFolder(id: folderID, name: "Work", sortOrder: 0)
-        let child1 = makeTab(title: "A", folderID: folderID, sortOrder: 1)
-        let child2 = makeTab(title: "B", folderID: folderID, sortOrder: 2)
+        let child1 = makeEntry(title: "A", folderID: folderID, sortOrder: 1)
+        let child2 = makeEntry(title: "B", folderID: folderID, sortOrder: 2)
 
         let expanded = flatItems([child1, child2], folders: [folder])
         let collapsed = flatItems([child1, child2], folders: [folder], collapsed: [folderID])
@@ -174,12 +173,14 @@ final class SidebarLayoutTests: XCTestCase {
     func testDiffCollapseWithExposedTab() {
         let folderID = UUID()
         let folder = makeFolder(id: folderID, name: "Work", sortOrder: 0)
-        let child1 = makeTab(title: "A", folderID: folderID, sortOrder: 1)
-        let child2 = makeTab(title: "B", folderID: folderID, sortOrder: 2)
+        let child1 = makeEntry(title: "A", folderID: folderID, sortOrder: 1)
+        let child2 = makeEntry(title: "B", folderID: folderID, sortOrder: 2)
+        let tab = BrowserTab(id: UUID(), title: "B", url: URL(string: "https://example.com"), faviconURL: nil, cachedInteractionState: nil, spaceID: UUID())
+        child2.tab = tab
 
         let expanded = flatItems([child1, child2], folders: [folder])
-        // Collapse with child2 selected → child2 exposed
-        let collapsed = flatItems([child1, child2], folders: [folder], collapsed: [folderID], selectedTabID: child2.id)
+        // Collapse with child2's tab selected → child2 exposed
+        let collapsed = flatItems([child1, child2], folders: [folder], collapsed: [folderID], selectedTabID: tab.id)
 
         let diff = diffSidebarState(oldPinnedItems: expanded, newPinnedItems: collapsed,
                                      oldTabs: [], newTabs: [])
@@ -189,31 +190,27 @@ final class SidebarLayoutTests: XCTestCase {
     }
 
     func testDiffTabPinned() {
+        let entry = makeEntry()
         let tab = makeTab()
-        let pinnedItem: [PinnedItem] = [.tab(tab, depth: 0)]
+        let pinnedItem: [PinnedItem] = [.entry(entry, depth: 0)]
 
         let diff = diffSidebarState(oldPinnedItems: [], newPinnedItems: pinnedItem,
                                      oldTabs: [tab], newTabs: [])
-        // Cross-section move: normal → pinned
-        XCTAssertTrue(diff.removedRows.isEmpty)
-        XCTAssertTrue(diff.insertedRows.isEmpty)
-        XCTAssertEqual(diff.movedRows.count, 1)
-        XCTAssertEqual(diff.movedRows[0].from, rowForNormalTab(at: 0, pinnedItemCount: 0))
-        XCTAssertEqual(diff.movedRows[0].to, rowForPinnedItem(at: 0))
+        // entry inserted, tab removed (different IDs, so not a move)
+        XCTAssertEqual(diff.removedRows.count, 1)
+        XCTAssertEqual(diff.insertedRows.count, 1)
     }
 
     func testDiffTabUnpinned() {
+        let entry = makeEntry()
         let tab = makeTab()
-        let pinnedItem: [PinnedItem] = [.tab(tab, depth: 0)]
+        let pinnedItem: [PinnedItem] = [.entry(entry, depth: 0)]
 
         let diff = diffSidebarState(oldPinnedItems: pinnedItem, newPinnedItems: [],
                                      oldTabs: [], newTabs: [tab])
-        // Cross-section move: pinned → normal
-        XCTAssertTrue(diff.removedRows.isEmpty)
-        XCTAssertTrue(diff.insertedRows.isEmpty)
-        XCTAssertEqual(diff.movedRows.count, 1)
-        XCTAssertEqual(diff.movedRows[0].from, rowForPinnedItem(at: 0))
-        XCTAssertEqual(diff.movedRows[0].to, rowForNormalTab(at: 0, pinnedItemCount: 0))
+        // entry removed, tab inserted (different IDs)
+        XCTAssertEqual(diff.removedRows.count, 1)
+        XCTAssertEqual(diff.insertedRows.count, 1)
     }
 
     func testDiffPureReorderProducesMoves() {
@@ -231,13 +228,13 @@ final class SidebarLayoutTests: XCTestCase {
     func testDiffPinnedReorderProducesMoves() {
         let folderID = UUID()
         let folder = makeFolder(id: folderID, name: "Work", sortOrder: 1)
-        let tab = makeTab(title: "A", sortOrder: 0)
+        let entry = makeEntry(title: "A", sortOrder: 0)
 
-        let oldItems = flatItems([tab], folders: [folder])  // [tab, folder]
-        // Reorder: folder first, then tab
+        let oldItems = flatItems([entry], folders: [folder])  // [entry, folder]
+        // Reorder: folder first, then entry
         let reorderedFolder = makeFolder(id: folderID, name: "Work", sortOrder: 0)
-        let reorderedTab = makeTab(id: tab.id, title: "A", sortOrder: 1)
-        let newItems = flatItems([reorderedTab], folders: [reorderedFolder])  // [folder, tab]
+        let reorderedEntry = makeEntry(id: entry.id, title: "A", sortOrder: 1)
+        let newItems = flatItems([reorderedEntry], folders: [reorderedFolder])  // [folder, entry]
 
         let diff = diffSidebarState(oldPinnedItems: oldItems, newPinnedItems: newItems,
                                      oldTabs: [], newTabs: [])
@@ -247,11 +244,8 @@ final class SidebarLayoutTests: XCTestCase {
     }
 
     func testDiffSwapPrefersMoveUpward() {
-        // When swapping two items, the LIS should keep the lower-old-index item stable
-        // and move the higher-old-index item upward. This matches the user's mental model
-        // (they dragged the item UP) and works correctly with sequential moveRow processing.
-        let t1 = makeTab(title: "A", sortOrder: 0)
-        let t2 = makeTab(title: "B", sortOrder: 1)
+        let t1 = makeTab()
+        let t2 = makeTab()
 
         let diff = diffSidebarState(oldPinnedItems: [], newPinnedItems: [],
                                      oldTabs: [t1, t2], newTabs: [t2, t1])
@@ -263,43 +257,37 @@ final class SidebarLayoutTests: XCTestCase {
     }
 
     func testDiffBlockMoveMinimal() {
-        // Dragging a folder (with child) above another item:
-        // Old: [TabA, FolderB, Child1]  New: [FolderB, Child1, TabA]
-        // LIS keeps FolderB+Child1 stable (old indices [1,2] are increasing).
-        // Only TabA needs to move (1 move, not 2).
         let folderID = UUID()
-        let tabA = makeTab(title: "A", sortOrder: 0)
+        let entryA = makeEntry(title: "A", sortOrder: 0)
         let folderB = makeFolder(id: folderID, name: "Folder", sortOrder: 1)
-        let child1 = makeTab(title: "Child", folderID: folderID, sortOrder: 2)
+        let child1 = makeEntry(title: "Child", folderID: folderID, sortOrder: 2)
 
-        let oldItems = flatItems([tabA, child1], folders: [folderB])
-        let newTabA = makeTab(id: tabA.id, title: "A", sortOrder: 2)
+        let oldItems = flatItems([entryA, child1], folders: [folderB])
+        let newEntryA = makeEntry(id: entryA.id, title: "A", sortOrder: 2)
         let newFolderB = makeFolder(id: folderID, name: "Folder", sortOrder: 0)
-        let newChild1 = makeTab(id: child1.id, title: "Child", folderID: folderID, sortOrder: 1)
-        let newItems = flatItems([newTabA, newChild1], folders: [newFolderB])
+        let newChild1 = makeEntry(id: child1.id, title: "Child", folderID: folderID, sortOrder: 1)
+        let newItems = flatItems([newEntryA, newChild1], folders: [newFolderB])
 
         let diff = diffSidebarState(oldPinnedItems: oldItems, newPinnedItems: newItems,
                                      oldTabs: [], newTabs: [])
         XCTAssertTrue(diff.removedRows.isEmpty)
         XCTAssertTrue(diff.insertedRows.isEmpty)
-        XCTAssertEqual(diff.movedRows.count, 1, "Only TabA moves; FolderB+Child1 stay (LIS)")
-        // TabA moves from old row 1 to new row 3
+        XCTAssertEqual(diff.movedRows.count, 1, "Only EntryA moves; FolderB+Child1 stay (LIS)")
+        // EntryA moves from old row 1 to new row 3
         XCTAssertEqual(diff.movedRows[0].from, rowForPinnedItem(at: 0))
         XCTAssertEqual(diff.movedRows[0].to, rowForPinnedItem(at: 2))
     }
 
     func testDiffEqualBlockSwapMovesUpward() {
-        // Two equal-size blocks swap: Old: [A, B, C, D]  New: [C, D, A, B]
-        // LIS keeps A,B stable (lower old indices), moves C,D upward.
-        let t1 = makeTab(title: "A", sortOrder: 0)
-        let t2 = makeTab(title: "B", sortOrder: 1)
-        let t3 = makeTab(title: "C", sortOrder: 2)
-        let t4 = makeTab(title: "D", sortOrder: 3)
+        let e1 = makeEntry(title: "A", sortOrder: 0)
+        let e2 = makeEntry(title: "B", sortOrder: 1)
+        let e3 = makeEntry(title: "C", sortOrder: 2)
+        let e4 = makeEntry(title: "D", sortOrder: 3)
 
-        let oldItems: [PinnedItem] = [.tab(t1, depth: 0), .tab(t2, depth: 0),
-                                       .tab(t3, depth: 0), .tab(t4, depth: 0)]
-        let newItems: [PinnedItem] = [.tab(t3, depth: 0), .tab(t4, depth: 0),
-                                       .tab(t1, depth: 0), .tab(t2, depth: 0)]
+        let oldItems: [PinnedItem] = [.entry(e1, depth: 0), .entry(e2, depth: 0),
+                                       .entry(e3, depth: 0), .entry(e4, depth: 0)]
+        let newItems: [PinnedItem] = [.entry(e3, depth: 0), .entry(e4, depth: 0),
+                                       .entry(e1, depth: 0), .entry(e2, depth: 0)]
 
         let diff = diffSidebarState(oldPinnedItems: oldItems, newPinnedItems: newItems,
                                      oldTabs: [], newTabs: [])
@@ -313,12 +301,10 @@ final class SidebarLayoutTests: XCTestCase {
     }
 
     func testDiffMovesAreSortedByDestination() {
-        // Verify that moves are always sorted by destination ascending,
-        // ensuring correct sequential processing by NSTableView.
-        let t1 = makeTab(title: "A", sortOrder: 0)
-        let t2 = makeTab(title: "B", sortOrder: 1)
-        let t3 = makeTab(title: "C", sortOrder: 2)
-        let t4 = makeTab(title: "D", sortOrder: 3)
+        let t1 = makeTab()
+        let t2 = makeTab()
+        let t3 = makeTab()
+        let t4 = makeTab()
 
         // Reverse the order: [D, C, B, A]
         let diff = diffSidebarState(oldPinnedItems: [], newPinnedItems: [],
@@ -331,12 +317,10 @@ final class SidebarLayoutTests: XCTestCase {
     }
 
     func testDiffSequentialMoveCorrectness() {
-        // Simulate NSTableView's sequential processing and verify the final order is correct.
-        // Old: [A, B, C, D] → New: [C, D, A, B]
-        let t1 = makeTab(title: "A", sortOrder: 0)
-        let t2 = makeTab(title: "B", sortOrder: 1)
-        let t3 = makeTab(title: "C", sortOrder: 2)
-        let t4 = makeTab(title: "D", sortOrder: 3)
+        let t1 = makeTab()
+        let t2 = makeTab()
+        let t3 = makeTab()
+        let t4 = makeTab()
 
         let diff = diffSidebarState(oldPinnedItems: [], newPinnedItems: [],
                                      oldTabs: [t1, t2, t3, t4], newTabs: [t3, t4, t1, t2])
@@ -357,9 +341,10 @@ final class SidebarLayoutTests: XCTestCase {
     }
 
     func testDiffNoChangesNoMoves() {
-        let t1 = makeTab(title: "A", sortOrder: 0)
-        let t2 = makeTab(title: "B", sortOrder: 1)
-        let items = flatItems([t1, t2])
+        let e1 = makeEntry(title: "A", sortOrder: 0)
+        let e2 = makeEntry(title: "B", sortOrder: 1)
+        let t1 = makeTab()
+        let items = flatItems([e1, e2])
         let diff = diffSidebarState(oldPinnedItems: items, newPinnedItems: items,
                                      oldTabs: [t1], newTabs: [t1])
         XCTAssertFalse(diff.hasChanges)
@@ -379,9 +364,9 @@ final class SidebarLayoutTests: XCTestCase {
     }
 
     func testDiffEmptyToPopulated() {
-        let t1 = makeTab()
+        let e1 = makeEntry()
         let t2 = makeTab()
-        let pinnedItem: [PinnedItem] = [.tab(t1, depth: 0)]
+        let pinnedItem: [PinnedItem] = [.entry(e1, depth: 0)]
 
         let diff = diffSidebarState(oldPinnedItems: [], newPinnedItems: pinnedItem,
                                      oldTabs: [], newTabs: [t2])
@@ -390,9 +375,9 @@ final class SidebarLayoutTests: XCTestCase {
     }
 
     func testDiffPopulatedToEmpty() {
-        let t1 = makeTab()
+        let e1 = makeEntry()
         let t2 = makeTab()
-        let pinnedItem: [PinnedItem] = [.tab(t1, depth: 0)]
+        let pinnedItem: [PinnedItem] = [.entry(e1, depth: 0)]
 
         let diff = diffSidebarState(oldPinnedItems: pinnedItem, newPinnedItems: [],
                                      oldTabs: [t2], newTabs: [])
@@ -401,28 +386,26 @@ final class SidebarLayoutTests: XCTestCase {
     }
 
     func testDiffMultipleSimultaneousChanges() {
-        let t1 = makeTab()
+        let e1 = makeEntry()
         let t2 = makeTab()
-        let t3 = makeTab()
+        let e3 = makeEntry()
         let t4 = makeTab()
-        let pinned1: [PinnedItem] = [.tab(t1, depth: 0)]
-        let pinned2: [PinnedItem] = [.tab(t3, depth: 0)]
+        let pinned1: [PinnedItem] = [.entry(e1, depth: 0)]
+        let pinned2: [PinnedItem] = [.entry(e3, depth: 0)]
 
-        // t1 pinned→removed, t2 normal→removed, t3 inserted as pinned, t4 inserted as normal
+        // e1 pinned→removed, t2 normal→removed, e3 inserted as pinned, t4 inserted as normal
         let diff = diffSidebarState(oldPinnedItems: pinned1, newPinnedItems: pinned2,
                                      oldTabs: [t2], newTabs: [t4])
-        XCTAssertEqual(diff.removedRows.count, 2)  // t1 from pinned, t2 from normal
-        XCTAssertEqual(diff.insertedRows.count, 2)  // t3 to pinned, t4 to normal
+        XCTAssertEqual(diff.removedRows.count, 2)  // e1 from pinned, t2 from normal
+        XCTAssertEqual(diff.insertedRows.count, 2)  // e3 to pinned, t4 to normal
     }
 
     // MARK: - Folder collapse/expand preserves folder row (chevron update scenario)
 
     func testDiffCollapseFolderKeepsFolderRow() {
-        // When collapsing a folder, the folder row itself must NOT be in removedRows
-        // (it survives and needs a cell refresh for the chevron, not a remove/insert)
         let folderID = UUID()
         let folder = makeFolder(id: folderID, name: "Work", sortOrder: 0)
-        let child = makeTab(title: "A", folderID: folderID, sortOrder: 1)
+        let child = makeEntry(title: "A", folderID: folderID, sortOrder: 1)
 
         let expanded = flatItems([child], folders: [folder])   // [folder, child]
         let collapsed = flatItems([child], folders: [folder], collapsed: [folderID])  // [folder]
@@ -438,11 +421,10 @@ final class SidebarLayoutTests: XCTestCase {
     }
 
     func testDiffExpandFolderKeepsFolderRow() {
-        // Same test for expand: folder row survives, children are inserted
         let folderID = UUID()
         let folder = makeFolder(id: folderID, name: "Work", sortOrder: 0)
-        let child1 = makeTab(title: "A", folderID: folderID, sortOrder: 1)
-        let child2 = makeTab(title: "B", folderID: folderID, sortOrder: 2)
+        let child1 = makeEntry(title: "A", folderID: folderID, sortOrder: 1)
+        let child2 = makeEntry(title: "B", folderID: folderID, sortOrder: 2)
 
         let collapsed = flatItems([child1, child2], folders: [folder], collapsed: [folderID])
         let expanded = flatItems([child1, child2], folders: [folder])
@@ -460,16 +442,14 @@ final class SidebarLayoutTests: XCTestCase {
     // MARK: - Normal tab pinned into folder (drag-to-folder scenario)
 
     func testDiffNormalTabPinnedIntoFolder() {
-        // Simulates the final state after: pin tab + move into folder
-        // Old: folder with 1 child (expanded), tab in normal section
-        // New: folder with 2 children (expanded), tab removed from normal
         let folderID = UUID()
         let folder = makeFolder(id: folderID, name: "Work", sortOrder: 0)
-        let existingChild = makeTab(title: "A", folderID: folderID, sortOrder: 1)
-        let draggedTab = makeTab(title: "B", sortOrder: 2)
+        let existingChild = makeEntry(title: "A", folderID: folderID, sortOrder: 1)
+        let draggedTab = makeTab()
 
         let oldPinned = flatItems([existingChild], folders: [folder])  // [folder, existingChild]
-        let newChild = makeTab(id: draggedTab.id, title: "B", folderID: folderID, sortOrder: 2)
+        // After pinning, the entry uses the same ID as the tab for cross-section move detection
+        let newChild = makeEntry(id: draggedTab.id, title: "B", folderID: folderID, sortOrder: 2)
         let newPinned = flatItems([existingChild, newChild], folders: [folder])  // [folder, existingChild, newChild]
 
         let diff = diffSidebarState(oldPinnedItems: oldPinned, newPinnedItems: newPinned,
@@ -485,15 +465,13 @@ final class SidebarLayoutTests: XCTestCase {
     }
 
     func testDiffNormalTabPinnedIntoCollapsedFolder() {
-        // Pin tab into a collapsed folder — tab should NOT appear as inserted
-        // because it's hidden. But the exposed tab logic might show it if selected.
         let folderID = UUID()
         let folder = makeFolder(id: folderID, name: "Work", sortOrder: 0)
-        let existingChild = makeTab(title: "A", folderID: folderID, sortOrder: 1)
-        let draggedTab = makeTab(title: "B", sortOrder: 2)
+        let existingChild = makeEntry(title: "A", folderID: folderID, sortOrder: 1)
+        let draggedTab = makeTab()
 
         let oldPinned = flatItems([existingChild], folders: [folder], collapsed: [folderID])  // [folder]
-        let newChild = makeTab(id: draggedTab.id, title: "B", folderID: folderID, sortOrder: 2)
+        let newChild = makeEntry(id: draggedTab.id, title: "B", folderID: folderID, sortOrder: 2)
         let newPinned = flatItems([existingChild, newChild], folders: [folder], collapsed: [folderID])  // [folder]
 
         let diff = diffSidebarState(oldPinnedItems: oldPinned, newPinnedItems: newPinned,

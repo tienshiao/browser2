@@ -286,7 +286,30 @@ struct AppDatabase {
     private var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
 
+        #if DEBUG
+        migrator.eraseDatabaseOnSchemaChange = true
+        #endif
+
         migrator.registerMigration("v1") { db in
+            // Profile
+            try db.create(table: "profile") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("userAgentMode", .integer).notNull().defaults(to: 0)
+                t.column("customUserAgent", .text)
+                t.column("archiveThreshold", .double).notNull().defaults(to: 43200)
+                t.column("searchEngine", .integer).notNull().defaults(to: 0)
+                t.column("searchSuggestionsEnabled", .boolean).notNull().defaults(to: true)
+                t.column("isPerTabIsolation", .boolean).notNull().defaults(to: false)
+                t.column("sleepThreshold", .double).notNull().defaults(to: 3600)
+                t.column("isAdBlockingEnabled", .boolean).notNull().defaults(to: true)
+                t.column("isEasyListEnabled", .boolean).notNull().defaults(to: true)
+                t.column("isEasyPrivacyEnabled", .boolean).notNull().defaults(to: true)
+                t.column("isEasyListCookieEnabled", .boolean).notNull().defaults(to: true)
+                t.column("isMalwareFilterEnabled", .boolean).notNull().defaults(to: true)
+            }
+
+            // Space
             try db.create(table: "space") { t in
                 t.primaryKey("id", .text)
                 t.column("name", .text).notNull()
@@ -294,8 +317,11 @@ struct AppDatabase {
                 t.column("colorHex", .text).notNull()
                 t.column("sortOrder", .integer).notNull()
                 t.column("selectedTabID", .text)
+                t.column("profileID", .text).notNull()
+                    .references("profile")
             }
 
+            // Tab
             try db.create(table: "tab") { t in
                 t.primaryKey("id", .text)
                 t.column("spaceID", .text).notNull()
@@ -305,16 +331,19 @@ struct AppDatabase {
                 t.column("faviconURL", .text)
                 t.column("interactionState", .blob)
                 t.column("sortOrder", .integer).notNull()
+                t.column("lastDeselectedAt", .double)
+                t.column("parentID", .text)
+                t.column("peekURL", .text)
+                t.column("peekInteractionState", .blob)
             }
 
+            // App state
             try db.create(table: "appState") { t in
                 t.primaryKey("key", .text)
                 t.column("value", .text)
             }
 
-        }
-
-        migrator.registerMigration("v2") { db in
+            // Closed tabs
             try db.create(table: "closedTab") { t in
                 t.autoIncrementedPrimaryKey("id")
                 t.column("tabID", .text).notNull()
@@ -324,10 +353,10 @@ struct AppDatabase {
                 t.column("faviconURL", .text)
                 t.column("interactionState", .blob)
                 t.column("sortOrder", .integer).notNull()
+                t.column("archivedAt", .double)
             }
-        }
 
-        migrator.registerMigration("v3") { db in
+            // Downloads
             try db.create(table: "download") { t in
                 t.primaryKey("id", .text)
                 t.column("filename", .text).notNull()
@@ -339,72 +368,8 @@ struct AppDatabase {
                 t.column("createdAt", .datetime).notNull()
                 t.column("completedAt", .datetime)
             }
-        }
 
-        migrator.registerMigration("v4") { db in
-            try db.create(table: "pinnedTab") { t in
-                t.primaryKey("id", .text)
-                t.column("spaceID", .text).notNull()
-                    .references("space", onDelete: .cascade)
-                t.column("pinnedURL", .text).notNull()
-                t.column("pinnedTitle", .text).notNull()
-                t.column("url", .text)
-                t.column("title", .text)
-                t.column("faviconURL", .text)
-                t.column("interactionState", .blob)
-                t.column("sortOrder", .integer).notNull()
-            }
-        }
-
-        migrator.registerMigration("v5") { db in
-            try db.alter(table: "tab") { t in
-                t.add(column: "lastDeselectedAt", .double)
-            }
-            try db.alter(table: "closedTab") { t in
-                t.add(column: "archivedAt", .double)
-            }
-        }
-
-        migrator.registerMigration("v6") { db in
-            try db.alter(table: "tab") { t in
-                t.add(column: "parentID", .text)
-            }
-        }
-
-        migrator.registerMigration("v7") { db in
-            // Create profile table
-            try db.create(table: "profile") { t in
-                t.primaryKey("id", .text)
-                t.column("name", .text).notNull()
-                t.column("userAgentMode", .integer).notNull().defaults(to: 0)
-                t.column("customUserAgent", .text)
-                t.column("archiveThreshold", .double).notNull().defaults(to: 43200)
-            }
-
-            // Insert default profile
-            let defaultProfileID = UUID().uuidString
-            try db.execute(
-                sql: "INSERT INTO profile (id, name, userAgentMode, archiveThreshold) VALUES (?, 'Default', 0, 43200)",
-                arguments: [defaultProfileID]
-            )
-
-            // Add profileID column to space table referencing the default profile
-            try db.alter(table: "space") { t in
-                t.add(column: "profileID", .text)
-                    .notNull()
-                    .defaults(to: defaultProfileID)
-                    .references("profile")
-            }
-        }
-
-        migrator.registerMigration("v8") { db in
-            try db.alter(table: "profile") { t in
-                t.add(column: "searchEngine", .integer).notNull().defaults(to: 0)
-                t.add(column: "searchSuggestionsEnabled", .boolean).notNull().defaults(to: true)
-            }
-        }
-
-        migrator.registerMigration("v9") { db in
+            // Pinned folders
             try db.create(table: "pinnedFolder") { t in
                 t.primaryKey("id", .text)
                 t.column("spaceID", .text).notNull()
@@ -416,54 +381,27 @@ struct AppDatabase {
                 t.column("sortOrder", .integer).notNull()
             }
 
-            try db.alter(table: "pinnedTab") { t in
-                t.add(column: "folderID", .text)
+            // Pinned tabs (slim: no duplicated tab fields, FK to tab)
+            try db.create(table: "pinnedTab") { t in
+                t.primaryKey("id", .text)
+                t.column("spaceID", .text).notNull()
+                    .references("space", onDelete: .cascade)
+                t.column("pinnedURL", .text).notNull()
+                t.column("pinnedTitle", .text).notNull()
+                t.column("faviconURL", .text)
+                t.column("sortOrder", .integer).notNull()
+                t.column("folderID", .text)
                     .references("pinnedFolder", onDelete: .setNull)
-            }
-        }
-
-        migrator.registerMigration("v10") { db in
-            try db.alter(table: "profile") { t in
-                t.add(column: "isPerTabIsolation", .boolean).notNull().defaults(to: false)
-            }
-        }
-
-        migrator.registerMigration("v11") { db in
-            try db.alter(table: "profile") { t in
-                t.add(column: "sleepThreshold", .double).notNull().defaults(to: 3600)
-            }
-        }
-
-        migrator.registerMigration("v12") { db in
-            try db.alter(table: "profile") { t in
-                t.add(column: "isAdBlockingEnabled", .boolean).notNull().defaults(to: true)
-                t.add(column: "isEasyListEnabled", .boolean).notNull().defaults(to: true)
-                t.add(column: "isEasyPrivacyEnabled", .boolean).notNull().defaults(to: true)
-                t.add(column: "isEasyListCookieEnabled", .boolean).notNull().defaults(to: true)
+                t.column("tabID", .text)
+                    .references("tab", onDelete: .setNull)
             }
 
+            // Content blocker whitelist
             try db.create(table: "contentBlockerWhitelist") { t in
                 t.column("profileID", .text).notNull()
                     .references("profile", onDelete: .cascade)
                 t.column("host", .text).notNull()
                 t.uniqueKey(["profileID", "host"])
-            }
-        }
-
-        migrator.registerMigration("v13") { db in
-            try db.alter(table: "profile") { t in
-                t.add(column: "isMalwareFilterEnabled", .boolean).notNull().defaults(to: true)
-            }
-        }
-
-        migrator.registerMigration("v14") { db in
-            try db.alter(table: "tab") { t in
-                t.add(column: "peekURL", .text)
-                t.add(column: "peekInteractionState", .blob)
-            }
-            try db.alter(table: "pinnedTab") { t in
-                t.add(column: "peekURL", .text)
-                t.add(column: "peekInteractionState", .blob)
             }
         }
 

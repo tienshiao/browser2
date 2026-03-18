@@ -392,16 +392,18 @@ class TabCellView: NSTableCellView {
         })
     }
 
-    func updatePinnedMode(tab: BrowserTab?) {
-        guard let tab, tab.isPinned else {
+    func updatePinnedMode(entry: PinnedEntry?) {
+        guard let entry else {
             // Normal tab: use xmark
             closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
             return
         }
-        if tab.isNavigatedWithinPinnedHost {
-            closeButton.image = NSImage(systemSymbolName: "minus", accessibilityDescription: "Reset to Home")
+        if entry.isLive {
+            // Live pinned tab: minus to make dormant
+            closeButton.image = NSImage(systemSymbolName: "minus", accessibilityDescription: "Close Tab")
         } else {
-            closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
+            // Dormant pinned entry: xmark to remove entirely
+            closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Remove Pin")
         }
     }
 

@@ -8,12 +8,8 @@ struct PinnedTabRecord: Codable, FetchableRecord, PersistableRecord {
     var spaceID: String
     var pinnedURL: String
     var pinnedTitle: String
-    var url: String?
-    var title: String?
     var faviconURL: String?
-    var interactionState: Data?
     var sortOrder: Int
     var folderID: String?
-    var peekURL: String?
-    var peekInteractionState: Data?
+    var tabID: String?
 }

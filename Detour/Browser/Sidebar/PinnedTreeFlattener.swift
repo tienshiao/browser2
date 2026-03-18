@@ -1,12 +1,12 @@
 import Foundation
 
 enum PinnedItem: Equatable {
-    case tab(BrowserTab, depth: Int)
+    case entry(PinnedEntry, depth: Int)
     case folder(PinnedFolder, depth: Int)
 
     static func == (lhs: PinnedItem, rhs: PinnedItem) -> Bool {
         switch (lhs, rhs) {
-        case (.tab(let a, let d1), .tab(let b, let d2)):
+        case (.entry(let a, let d1), .entry(let b, let d2)):
             return a.id == b.id && d1 == d2
         case (.folder(let a, let d1), .folder(let b, let d2)):
             return a.id == b.id && d1 == d2
@@ -17,26 +17,26 @@ enum PinnedItem: Equatable {
 
     var depth: Int {
         switch self {
-        case .tab(_, let d): return d
+        case .entry(_, let d): return d
         case .folder(_, let d): return d
         }
     }
 }
 
 func flattenPinnedTree(
-    tabs: [BrowserTab],
+    entries: [PinnedEntry],
     folders: [PinnedFolder],
     collapsedFolderIDs: Set<UUID>,
     selectedTabID: UUID?
 ) -> [PinnedItem] {
     // Build lookup structures
     let foldersByParent = Dictionary(grouping: folders.sorted(by: { $0.sortOrder < $1.sortOrder })) { $0.parentFolderID }
-    let tabsByFolder = Dictionary(grouping: tabs.sorted(by: { ($0.pinnedSortOrder ?? 0) < ($1.pinnedSortOrder ?? 0) })) { $0.folderID }
+    let entriesByFolder = Dictionary(grouping: entries.sorted(by: { $0.sortOrder < $1.sortOrder })) { $0.folderID }
 
     var result: [PinnedItem] = []
 
     func flatten(parentID: UUID?, depth: Int) {
-        // Merge folders and top-level tabs at this level, sorted by sortOrder
+        // Merge folders and top-level entries at this level, sorted by sortOrder
         var items: [(sortOrder: Int, kind: Either)] = []
 
         if let childFolders = foldersByParent[parentID] {
@@ -44,9 +44,9 @@ func flattenPinnedTree(
                 items.append((sortOrder: folder.sortOrder, kind: .folder(folder)))
             }
         }
-        if let childTabs = tabsByFolder[parentID] {
-            for tab in childTabs {
-                items.append((sortOrder: tab.pinnedSortOrder ?? 0, kind: .tab(tab)))
+        if let childEntries = entriesByFolder[parentID] {
+            for entry in childEntries {
+                items.append((sortOrder: entry.sortOrder, kind: .entry(entry)))
             }
         }
 
@@ -59,14 +59,14 @@ func flattenPinnedTree(
                 let isCollapsed = collapsedFolderIDs.contains(folder.id)
                 if isCollapsed {
                     // Show selected tab as exposed row if it's inside this collapsed folder
-                    if let selectedTabID, let exposedTab = findSelectedTab(in: folder.id, tabs: tabs, folders: folders, selectedTabID: selectedTabID) {
-                        result.append(.tab(exposedTab, depth: depth + 1))
+                    if let selectedTabID, let exposedEntry = findSelectedEntry(in: folder.id, entries: entries, folders: folders, selectedTabID: selectedTabID) {
+                        result.append(.entry(exposedEntry, depth: depth + 1))
                     }
                 } else {
                     flatten(parentID: folder.id, depth: depth + 1)
                 }
-            case .tab(let tab):
-                result.append(.tab(tab, depth: depth))
+            case .entry(let entry):
+                result.append(.entry(entry, depth: depth))
             }
         }
     }
@@ -76,15 +76,15 @@ func flattenPinnedTree(
 }
 
 /// Recursively searches for the selected tab within a folder hierarchy.
-private func findSelectedTab(in folderID: UUID, tabs: [BrowserTab], folders: [PinnedFolder], selectedTabID: UUID) -> BrowserTab? {
+private func findSelectedEntry(in folderID: UUID, entries: [PinnedEntry], folders: [PinnedFolder], selectedTabID: UUID) -> PinnedEntry? {
     // Check direct children
-    if let tab = tabs.first(where: { $0.folderID == folderID && $0.id == selectedTabID }) {
-        return tab
+    if let entry = entries.first(where: { $0.folderID == folderID && $0.tab?.id == selectedTabID }) {
+        return entry
     }
     // Check nested folders
     for childFolder in folders where childFolder.parentFolderID == folderID {
-        if let tab = findSelectedTab(in: childFolder.id, tabs: tabs, folders: folders, selectedTabID: selectedTabID) {
-            return tab
+        if let entry = findSelectedEntry(in: childFolder.id, entries: entries, folders: folders, selectedTabID: selectedTabID) {
+            return entry
         }
     }
     return nil
@@ -95,31 +95,31 @@ private func findSelectedTab(in folderID: UUID, tabs: [BrowserTab], folders: [Pi
 func folderIDForDropIndex(_ index: Int, in items: [PinnedItem]) -> UUID? {
     guard index < items.count else { return nil }
     switch items[index] {
-    case .tab(let tab, let depth):
-        return depth > 0 ? tab.folderID : nil
+    case .entry(let entry, let depth):
+        return depth > 0 ? entry.folderID : nil
     case .folder(let folder, let depth):
         return depth > 0 ? folder.parentFolderID : nil
     }
 }
 
-/// Returns the item ID (tab or folder) at the given flattened drop index.
+/// Returns the item ID (entry or folder) at the given flattened drop index.
 /// The dropped item should appear before this item. Returns nil if past the end.
 func itemIDAtDropIndex(_ index: Int, in items: [PinnedItem]) -> UUID? {
     guard index < items.count else { return nil }
     switch items[index] {
-    case .tab(let tab, _): return tab.id
+    case .entry(let entry, _): return entry.id
     case .folder(let folder, _): return folder.id
     }
 }
 
 func pinnedItemID(_ item: PinnedItem) -> UUID {
     switch item {
-    case .tab(let t, _): return t.id
+    case .entry(let e, _): return e.id
     case .folder(let f, _): return f.id
     }
 }
 
 private enum Either {
     case folder(PinnedFolder)
-    case tab(BrowserTab)
+    case entry(PinnedEntry)
 }

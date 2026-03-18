@@ -238,7 +238,7 @@ class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource, NS
 
     private func gatherTabInfos() -> [SuggestionProvider.TabInfo] {
         (tabStore?.spaces ?? []).flatMap { space in
-            (space.tabs + space.pinnedTabs).map { tab in
+            (space.tabs + space.pinnedEntries.compactMap(\.tab)).map { tab in
                 SuggestionProvider.TabInfo(
                     tabID: tab.id,
                     spaceID: space.id,

@@ -81,7 +81,7 @@ class BrowserWindowController: NSWindowController {
 
     var selectedTab: BrowserTab? {
         guard let selectedTabID else { return nil }
-        return activeSpace?.pinnedTabs.first { $0.id == selectedTabID }
+        return activeSpace?.pinnedEntries.first { $0.tab?.id == selectedTabID }?.tab
             ?? currentTabs.first { $0.id == selectedTabID }
     }
 
@@ -150,7 +150,7 @@ class BrowserWindowController: NSWindowController {
         } else {
             tabSidebar.activeSpaceID = activeSpaceID
             tabSidebar.pinnedFolders = activeSpace?.pinnedFolders ?? []
-            tabSidebar.pinnedTabs = activeSpace?.pinnedTabs ?? []
+            tabSidebar.pinnedEntries = activeSpace?.pinnedEntries ?? []
             tabSidebar.tabs = currentTabs
 
             // Apply initial space UI
@@ -200,16 +200,18 @@ class BrowserWindowController: NSWindowController {
             store.lastActiveSpaceID = id
         }
 
-        tabSidebar.applyState(pinnedTabs: space.pinnedTabs, pinnedFolders: space.pinnedFolders, tabs: space.tabs)
+        tabSidebar.applyState(pinnedEntries: space.pinnedEntries, pinnedFolders: space.pinnedFolders, tabs: space.tabs)
         tabSidebar.tintColor = space.color
         tabSidebar.updateSpaceButtons(spaces: store.spaces, activeSpaceID: id)
 
         if selectTab {
             // Restore the new space's selected tab
             if let savedTabID = space.selectedTabID,
-               space.tabs.contains(where: { $0.id == savedTabID }) || space.pinnedTabs.contains(where: { $0.id == savedTabID }) {
+               space.tabs.contains(where: { $0.id == savedTabID }) || space.pinnedEntries.contains(where: { $0.tab?.id == savedTabID }) {
                 self.selectTab(id: savedTabID)
-            } else if let firstTab = space.pinnedTabs.first ?? space.tabs.first {
+            } else if let firstLivePinnedTab = space.pinnedEntries.first(where: { $0.tab != nil })?.tab {
+                self.selectTab(id: firstLivePinnedTab.id)
+            } else if let firstTab = space.tabs.first {
                 self.selectTab(id: firstTab.id)
             } else {
                 deselectAllTabs()
@@ -521,7 +523,7 @@ class BrowserWindowController: NSWindowController {
     // MARK: - Tab Selection & WebView Ownership
 
     func selectTab(id: UUID) {
-        let isPinnedTab = activeSpace?.pinnedTabs.contains(where: { $0.id == id }) ?? false
+        let isPinnedTab = activeSpace?.pinnedEntries.contains(where: { $0.tab?.id == id }) ?? false
         let isNormalTab = currentTabs.contains(where: { $0.id == id })
         guard isPinnedTab || isNormalTab else { return }
 
@@ -569,11 +571,11 @@ class BrowserWindowController: NSWindowController {
             .store(in: &activeTabSubscriptions)
 
         if let space = activeSpace {
-            tabSidebar.applyState(pinnedTabs: space.pinnedTabs, pinnedFolders: space.pinnedFolders,
+            tabSidebar.applyState(pinnedEntries: space.pinnedEntries, pinnedFolders: space.pinnedFolders,
                                   tabs: currentTabs, selectedTabID: id)
         }
 
-        if let index = activeSpace?.pinnedTabs.firstIndex(where: { $0.id == id }) {
+        if let index = activeSpace?.pinnedEntries.firstIndex(where: { $0.tab?.id == id }) {
             tabSidebar.selectedPinnedTabIndex = index
         } else if let index = currentTabs.firstIndex(where: { $0.id == id }) {
             tabSidebar.selectedTabIndex = index
@@ -838,7 +840,7 @@ class BrowserWindowController: NSWindowController {
     private func parentTab(for tab: BrowserTab) -> BrowserTab? {
         guard let parentID = tab.parentID else { return nil }
         return currentTabs.first { $0.id == parentID }
-            ?? activeSpace?.pinnedTabs.first { $0.id == parentID }
+            ?? activeSpace?.pinnedEntries.compactMap(\.tab).first { $0.id == parentID }
     }
 
     func navigateBackOrCloseChildTab() {
@@ -959,7 +961,7 @@ class BrowserWindowController: NSWindowController {
         activeTabSubscriptions.removeAll()
         dragHandle.isHidden = true
         removeContentViews()
-        let hasTabs = !(activeSpace?.tabs.isEmpty ?? true) || !(activeSpace?.pinnedTabs.isEmpty ?? true)
+        let hasTabs = !(activeSpace?.tabs.isEmpty ?? true) || !(activeSpace?.pinnedEntries.isEmpty ?? true)
         emptyStateLabel.stringValue = hasTabs ? "Where to next?" : "A rare moment of tab peace."
         emptyStateLabel.isHidden = false
         tabSidebar.fauxAddressBar.displayText = ""
@@ -985,8 +987,8 @@ class BrowserWindowController: NSWindowController {
 
         guard let space = activeSpace else { return }
 
-        // Check if it's a pinned tab
-        if let index = space.pinnedTabs.firstIndex(where: { $0.id == id }) {
+        // Check if it's a pinned entry
+        if let index = space.pinnedEntries.firstIndex(where: { $0.tab?.id == id }) {
             closePinnedTab(at: index)
             return
         }
@@ -997,17 +999,11 @@ class BrowserWindowController: NSWindowController {
     }
 
     func closePinnedTab(at index: Int) {
-        guard let space = activeSpace else { return }
-        let tab = space.pinnedTabs[index]
-
-        if tab.isAtPinnedHome {
-            // At home — just deselect, pinned tab persists
-            deselectAllTabs()
-        } else {
-            // Reset to home — tab stays, select next
-            store.closePinnedTab(id: tab.id, in: space)
-            // Tab remains pinned, select it if it was selected (it resets to home)
-        }
+        guard let space = activeSpace, index < space.pinnedEntries.count else { return }
+        let entry = space.pinnedEntries[index]
+        // Always make dormant (discard backing tab), then deselect
+        store.closePinnedTab(id: entry.id, in: space)
+        deselectAllTabs()
     }
 
     func closeTab(at index: Int, wasSelected: Bool) {
@@ -1023,7 +1019,13 @@ class BrowserWindowController: NSWindowController {
 
         if wasSelected {
             if let nextID { selectTab(id: nextID) }
-            else if let firstPinned = space.pinnedTabs.first { selectTab(id: firstPinned.id) }
+            else if let firstLiveEntry = space.pinnedEntries.first(where: { $0.tab != nil }),
+                    let tab = firstLiveEntry.tab { selectTab(id: tab.id) }
+            else if let firstDormantEntry = space.pinnedEntries.first {
+                store.activatePinnedEntry(id: firstDormantEntry.id, in: space)
+                if let tab = firstDormantEntry.tab { selectTab(id: tab.id) }
+                else { deselectAllTabs() }
+            }
             else { deselectAllTabs() }
         }
     }
@@ -1033,8 +1035,8 @@ class BrowserWindowController: NSWindowController {
     @objc func togglePinTab(_ sender: Any?) {
         guard !isIncognito else { return }
         guard let tab = selectedTab, let space = activeSpace else { return }
-        if tab.isPinned {
-            store.unpinTab(id: tab.id, in: space)
+        if let entry = space.pinnedEntries.first(where: { $0.tab?.id == tab.id }) {
+            store.unpinTab(id: entry.id, in: space)
             selectTab(id: tab.id)
         } else {
             guard tab.url != nil else { return }
@@ -1285,8 +1287,9 @@ extension BrowserWindowController: NSMenuItemValidation {
         if menuItem.action == #selector(togglePinTab(_:)) {
             guard let tab = selectedTab else { return false }
             if isIncognito { return false }
-            menuItem.title = tab.isPinned ? "Unpin Tab" : "Pin Tab"
-            if !tab.isPinned && tab.url == nil { return false }
+            let isPinned = activeSpace?.pinnedEntries.contains(where: { $0.tab?.id == tab.id }) ?? false
+            menuItem.title = isPinned ? "Unpin Tab" : "Pin Tab"
+            if !isPinned && tab.url == nil { return false }
             return true
         }
         return true
