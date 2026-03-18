@@ -7,6 +7,8 @@ struct ExtensionManifest: Codable {
     let version: String
     let description: String?
     let permissions: [String]?
+    let hostPermissions: [String]?
+    let optionalPermissions: [String]?
     let action: Action?
     let background: Background?
     let contentScripts: [ContentScript]?
@@ -97,6 +99,8 @@ struct ExtensionManifest: Codable {
     enum CodingKeys: String, CodingKey {
         case manifestVersion = "manifest_version"
         case name, version, description, permissions, action, background
+        case hostPermissions = "host_permissions"
+        case optionalPermissions = "optional_permissions"
         case contentScripts = "content_scripts"
         case icons
     }

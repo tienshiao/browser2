@@ -10,9 +10,21 @@ class ExtensionManager {
     var backgroundHosts: [String: BackgroundHost] = [:]
 
     let injector = ContentScriptInjector()
+    let tabIDMap = ExtensionTabIDMap()
+    let spaceIDMap = ExtensionTabIDMap()
+    let tabObserver = ExtensionTabObserver()
+
+    /// The most recently focused space ID, used for `currentWindow` queries.
+    var lastActiveSpaceID: UUID?
 
     /// Notification posted when the set of enabled extensions changes.
     static let extensionsDidChangeNotification = Notification.Name("ExtensionManagerExtensionsDidChange")
+
+    /// Notification posted when an extension requests tab selection.
+    static let tabShouldSelectNotification = Notification.Name("extensionTabShouldSelect")
+
+    /// Notification for tab activation events from the browser.
+    static let tabActivatedNotification = Notification.Name("extensionTabActivated")
 
     init() {}
 
@@ -32,6 +44,15 @@ class ExtensionManager {
                 startBackground(for: ext)
             }
         }
+
+        // Register tab observer for chrome.tabs events
+        TabStore.shared.addObserver(tabObserver)
+
+        // Observe tab activation events from BrowserWindowController
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleTabActivated(_:)),
+            name: Self.tabActivatedNotification, object: nil
+        )
     }
 
     /// All currently enabled extensions.
@@ -49,12 +70,46 @@ class ExtensionManager {
         backgroundHosts[extensionID]
     }
 
+    @objc private func handleTabActivated(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let tabID = info["tabID"] as? UUID,
+              let spaceID = info["spaceID"] as? UUID else { return }
+        tabObserver.dispatchActivated(tabID: tabID, spaceID: spaceID)
+    }
+
+    /// Fire a web navigation event to all background hosts.
+    func fireWebNavigationEvent(_ eventName: String, details: [String: Any]) {
+        guard let detailsData = try? JSONSerialization.data(withJSONObject: details),
+              let detailsJSON = String(data: detailsData, encoding: .utf8) else { return }
+
+        let js = "if (window.__extensionDispatchWebNavEvent) { window.__extensionDispatchWebNavEvent('\(eventName)', \(detailsJSON)); }"
+
+        for ext in enabledExtensions {
+            backgroundHost(for: ext.id)?.evaluateJavaScript(js)
+        }
+    }
+
+    /// Inject content scripts into all existing tabs for a newly installed/enabled extension.
+    func injectIntoExistingTabs(extension ext: WebExtension) {
+        for space in TabStore.shared.spaces {
+            for tab in space.tabs {
+                injector.injectIntoExistingTab(tab, for: ext)
+            }
+            for entry in space.pinnedEntries {
+                if let tab = entry.tab {
+                    injector.injectIntoExistingTab(tab, for: ext)
+                }
+            }
+        }
+    }
+
     /// Install an extension from an unpacked directory.
     @discardableResult
     func install(from sourceURL: URL) throws -> WebExtension {
         let ext = try ExtensionInstaller.install(from: sourceURL)
         extensions.append(ext)
         startBackground(for: ext)
+        injectIntoExistingTabs(extension: ext)
         NotificationCenter.default.post(name: Self.extensionsDidChangeNotification, object: nil)
         return ext
     }

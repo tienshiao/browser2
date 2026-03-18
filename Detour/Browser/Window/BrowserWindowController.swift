@@ -172,6 +172,13 @@ class BrowserWindowController: NSWindowController {
             name: .contentBlockerRulesDidChange,
             object: nil
         )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleExtensionTabShouldSelect(_:)),
+            name: ExtensionManager.tabShouldSelectNotification,
+            object: nil
+        )
     }
 
     deinit {
@@ -557,6 +564,15 @@ class BrowserWindowController: NSWindowController {
         activeTabSubscriptions.removeAll()
         dragHandle.isHidden = false
 
+        // Notify extensions of tab activation
+        if let spaceID = activeSpaceID {
+            NotificationCenter.default.post(
+                name: ExtensionManager.tabActivatedNotification,
+                object: nil,
+                userInfo: ["tabID": id, "spaceID": spaceID]
+            )
+        }
+
         guard let tab = selectedTab else { return }
         tab.lastDeselectedAt = nil
         if tab.isSleeping { tab.wake() }
@@ -766,6 +782,15 @@ class BrowserWindowController: NSWindowController {
             }
             showSnapshot(for: tab)
         }
+    }
+
+    @objc private func handleExtensionTabShouldSelect(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let tabID = info["tabID"] as? UUID,
+              let spaceID = info["spaceID"] as? UUID else { return }
+        // Only handle if this window owns the space
+        guard activeSpaceID == spaceID else { return }
+        selectTab(id: tabID)
     }
 
     // MARK: - Navigation
@@ -1300,6 +1325,11 @@ extension BrowserWindowController: NSMenuItemValidation {
 
 extension BrowserWindowController: NSWindowDelegate {
     func windowDidBecomeKey(_ notification: Notification) {
+        // Update extension manager's active space for chrome.tabs.query({currentWindow: true})
+        if let spaceID = activeSpaceID {
+            ExtensionManager.shared.lastActiveSpaceID = spaceID
+        }
+
         if let tab = selectedTab {
             claimWebView(for: tab)
             // Restore peek overlay if the tab has one and we don't already have it showing

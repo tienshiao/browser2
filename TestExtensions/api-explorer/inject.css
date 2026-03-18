@@ -1,0 +1,4 @@
+/* Injected via chrome.scripting.insertCSS({ files: ['inject.css'] }) */
+body {
+  outline: 4px solid red !important;
+}

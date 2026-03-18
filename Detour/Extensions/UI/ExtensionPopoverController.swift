@@ -20,6 +20,7 @@ class ExtensionPopoverController: NSObject {
         // Create a WKWebView with chrome API polyfills
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
+        config.preferences.setValue(true, forKey: "developerExtrasEnabled")
 
         let apiBundle = ChromeAPIBundle.generateBundle(for: ext, isContentScript: false)
         let apiScript = WKUserScript(
@@ -31,6 +32,7 @@ class ExtensionPopoverController: NSObject {
         ExtensionMessageBridge.shared.register(on: config.userContentController)
 
         let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: 360, height: 480), configuration: config)
+        wv.isInspectable = true
         wv.loadFileURL(popupURL, allowingReadAccessTo: ext.basePath)
         self.webView = wv
 

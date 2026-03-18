@@ -20,6 +20,7 @@ class BackgroundHost {
 
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
+        config.preferences.setValue(true, forKey: "developerExtrasEnabled")
 
         // Add chrome API polyfills in the .page world (background runs in .page)
         let apiBundle = ChromeAPIBundle.generateBundle(for: ext, isContentScript: false)
@@ -34,6 +35,7 @@ class BackgroundHost {
         ExtensionMessageBridge.shared.register(on: config.userContentController)
 
         let wv = WKWebView(frame: .zero, configuration: config)
+        wv.isInspectable = true
         self.webView = wv
 
         // Read the background script and inline it, since loadHTMLString with a
@@ -63,5 +65,13 @@ class BackgroundHost {
     /// Evaluate JavaScript in the background webView.
     func evaluateJavaScript(_ js: String, completionHandler: ((Any?, Error?) -> Void)? = nil) {
         webView?.evaluateJavaScript(js, completionHandler: completionHandler)
+    }
+
+    /// Dispatch an event to the background script by name with a JSON-serializable data dict.
+    func dispatchEvent(_ functionName: String, data: [String: Any]) {
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: data),
+              let jsonString = String(data: jsonData, encoding: .utf8) else { return }
+        let js = "if (window.\(functionName)) { window.\(functionName)(\(jsonString)); }"
+        evaluateJavaScript(js)
     }
 }

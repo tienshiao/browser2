@@ -10,6 +10,10 @@ struct ChromeAPIBundle {
         var parts: [String] = []
         parts.append(ChromeRuntimeAPI.generateJS(extensionID: ext.id, manifest: ext.manifest, isContentScript: isContentScript))
         parts.append(ChromeStorageAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
+        parts.append(ChromeTabsAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
+        parts.append(ChromeScriptingAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
+        parts.append(ChromeWebNavigationAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
+        parts.append(ChromeWebRequestAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
         return parts.joined(separator: "\n\n")
     }
 }

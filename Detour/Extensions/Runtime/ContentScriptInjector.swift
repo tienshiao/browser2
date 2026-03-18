@@ -96,4 +96,56 @@ class ContentScriptInjector {
             }
         }
     }
+
+    /// Inject content scripts into an already-loaded tab for a specific extension.
+    /// Used when an extension is installed/enabled and tabs are already open.
+    func injectIntoExistingTab(_ tab: BrowserTab, for ext: WebExtension) {
+        guard let webView = tab.webView, let url = tab.url else { return }
+
+        // Check if any content script group matches this tab's URL
+        let matchingGroups = ext.contentScriptMatchers.filter { $0.matcher.matches(url) }
+        guard !matchingGroups.isEmpty else { return }
+
+        // Inject the chrome API polyfill
+        let apiBundle = ChromeAPIBundle.generateBundle(for: ext)
+        webView.evaluateJavaScript(apiBundle, in: nil, in: ext.contentWorld) { _ in }
+
+        // Register the message bridge on the webView's userContentController
+        ExtensionMessageBridge.shared.register(on: webView.configuration.userContentController,
+                                                contentWorld: ext.contentWorld)
+
+        // Inject CSS and JS for matching groups
+        for csGroup in matchingGroups {
+            for cssFile in csGroup.cssFiles {
+                let cssURL = ext.basePath.appendingPathComponent(cssFile)
+                guard let cssContent = try? String(contentsOf: cssURL, encoding: .utf8) else { continue }
+                let escapedCSS = cssContent
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "'", with: "\\'")
+                    .replacingOccurrences(of: "\n", with: "\\n")
+
+                let cssJS = """
+                (function() {
+                    var style = document.createElement('style');
+                    style.textContent = '\(escapedCSS)';
+                    (document.head || document.documentElement).appendChild(style);
+                })();
+                """
+                webView.evaluateJavaScript(cssJS, in: nil, in: ext.contentWorld) { _ in }
+            }
+
+            for jsFile in csGroup.scripts {
+                let jsURL = ext.basePath.appendingPathComponent(jsFile)
+                guard let jsContent = try? String(contentsOf: jsURL, encoding: .utf8) else { continue }
+                webView.evaluateJavaScript(jsContent, in: nil, in: ext.contentWorld) { _ in }
+            }
+        }
+    }
+
+    /// Re-inject content scripts for all enabled extensions into a tab (e.g. after wake()).
+    func reinjectContentScripts(into tab: BrowserTab) {
+        for ext in ExtensionManager.shared.enabledExtensions {
+            injectIntoExistingTab(tab, for: ext)
+        }
+    }
 }

@@ -180,4 +180,58 @@ final class ExtensionManifestTests: XCTestCase {
         XCTAssertEqual(manifest.contentScripts?[0].matches, ["https://a.com/*"])
         XCTAssertEqual(manifest.contentScripts?[1].matches, ["https://b.com/*"])
     }
+
+    // MARK: - Host permissions (Phase 2)
+
+    func testParseHostPermissions() throws {
+        let manifest = try parse("""
+        {
+            "manifest_version": 3, "name": "T", "version": "1",
+            "host_permissions": ["https://*.example.com/*", "http://localhost/*"]
+        }
+        """)
+        XCTAssertEqual(manifest.hostPermissions?.count, 2)
+        XCTAssertEqual(manifest.hostPermissions?[0], "https://*.example.com/*")
+        XCTAssertEqual(manifest.hostPermissions?[1], "http://localhost/*")
+    }
+
+    func testHostPermissionsNilWhenAbsent() throws {
+        let manifest = try parse("""
+        {"manifest_version": 3, "name": "T", "version": "1"}
+        """)
+        XCTAssertNil(manifest.hostPermissions)
+    }
+
+    func testParseOptionalPermissions() throws {
+        let manifest = try parse("""
+        {
+            "manifest_version": 3, "name": "T", "version": "1",
+            "optional_permissions": ["tabs", "history"]
+        }
+        """)
+        XCTAssertEqual(manifest.optionalPermissions?.count, 2)
+        XCTAssertEqual(manifest.optionalPermissions?[0], "tabs")
+        XCTAssertEqual(manifest.optionalPermissions?[1], "history")
+    }
+
+    func testOptionalPermissionsNilWhenAbsent() throws {
+        let manifest = try parse("""
+        {"manifest_version": 3, "name": "T", "version": "1"}
+        """)
+        XCTAssertNil(manifest.optionalPermissions)
+    }
+
+    func testRoundTripWithHostPermissions() throws {
+        let original = try parse("""
+        {
+            "manifest_version": 3, "name": "RT", "version": "1",
+            "host_permissions": ["<all_urls>"],
+            "optional_permissions": ["bookmarks"]
+        }
+        """)
+        let data = try original.toJSONData()
+        let decoded = try JSONDecoder().decode(ExtensionManifest.self, from: data)
+        XCTAssertEqual(decoded.hostPermissions, ["<all_urls>"])
+        XCTAssertEqual(decoded.optionalPermissions, ["bookmarks"])
+    }
 }

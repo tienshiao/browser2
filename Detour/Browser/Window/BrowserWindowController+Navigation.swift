@@ -107,6 +107,18 @@ extension BrowserWindowController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         if webView.url?.scheme == ErrorPage.scheme { return }
         selectedTab?.didCommitNavigation()
+
+        // Fire chrome.webNavigation.onCommitted for extensions
+        if let tab = selectedTab, let url = webView.url, let spaceID = activeSpaceID {
+            let mgr = ExtensionManager.shared
+            let tabID = mgr.tabIDMap.intID(for: tab.id)
+            mgr.fireWebNavigationEvent("onCommitted", details: [
+                "tabId": tabID,
+                "url": url.absoluteString,
+                "frameId": 0,
+                "timeStamp": Date().timeIntervalSince1970 * 1000
+            ])
+        }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
@@ -115,6 +127,19 @@ extension BrowserWindowController: WKNavigationDelegate {
         // becomes a download — not a real failure, so don't show an error page.
         if nsError.domain == "WebKitErrorDomain", nsError.code == 102 { return }
         selectedTab?.didFailProvisionalNavigation(error: error)
+
+        // Fire chrome.webNavigation.onErrorOccurred for extensions
+        if let tab = selectedTab, let url = webView.url ?? tab.url {
+            let mgr = ExtensionManager.shared
+            let tabID = mgr.tabIDMap.intID(for: tab.id)
+            mgr.fireWebNavigationEvent("onErrorOccurred", details: [
+                "tabId": tabID,
+                "url": url.absoluteString,
+                "frameId": 0,
+                "error": nsError.localizedDescription,
+                "timeStamp": Date().timeIntervalSince1970 * 1000
+            ])
+        }
     }
 
     internal func triggerDownloadAnimation() {

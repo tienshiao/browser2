@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>API Explorer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 420px;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 13px;
+      padding: 12px;
+      color: #222;
+    }
+    h1 { font-size: 16px; margin-bottom: 10px; }
+    h2 { font-size: 13px; margin: 12px 0 6px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
+    section { border-bottom: 1px solid #eee; padding-bottom: 8px; }
+    section:last-child { border-bottom: none; }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 5px 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    button:hover { background: #1d4ed8; }
+    input[type="text"], input[type="number"] {
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 12px;
+      width: 120px;
+    }
+    .row { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+    .result {
+      margin-top: 4px;
+      padding: 6px 8px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      font-family: "SF Mono", Menlo, monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 160px;
+      overflow-y: auto;
+      display: none;
+    }
+    .result.visible { display: block; }
+    .result.error { color: #dc2626; background: #fef2f2; }
+    #event-log .result { max-height: 240px; }
+  </style>
+</head>
+<body>
+  <h1>API Explorer</h1>
+
+  <!-- Query All Tabs -->
+  <section>
+    <h2>Tab List</h2>
+    <div class="row">
+      <button id="btn-query-all">Query All Tabs</button>
+    </div>
+    <div class="result" id="res-query-all"></div>
+  </section>
+
+  <!-- Active Tab -->
+  <section>
+    <h2>Active Tab</h2>
+    <div class="row">
+      <button id="btn-active-tab">Active Tab</button>
+    </div>
+    <div class="result" id="res-active-tab"></div>
+  </section>
+
+  <!-- Create Tab -->
+  <section>
+    <h2>Create Tab</h2>
+    <div class="row">
+      <input type="text" id="input-create-url" placeholder="https://example.com">
+      <button id="btn-create-tab">Create</button>
+    </div>
+    <div class="result" id="res-create-tab"></div>
+  </section>
+
+  <!-- Close Tab -->
+  <section>
+    <h2>Close Tab</h2>
+    <div class="row">
+      <input type="number" id="input-close-id" placeholder="Tab ID">
+      <button id="btn-close-tab">Close</button>
+    </div>
+    <div class="result" id="res-close-tab"></div>
+  </section>
+
+  <!-- Execute Script -->
+  <section>
+    <h2>Execute Script</h2>
+    <div class="row">
+      <input type="number" id="input-exec-id" placeholder="Tab ID">
+      <button id="btn-exec-script">Run inject.js</button>
+    </div>
+    <div class="result" id="res-exec-script"></div>
+  </section>
+
+  <!-- Insert CSS -->
+  <section>
+    <h2>Insert CSS</h2>
+    <div class="row">
+      <input type="number" id="input-css-id" placeholder="Tab ID">
+      <button id="btn-insert-css">Insert inject.css</button>
+    </div>
+    <div class="result" id="res-insert-css"></div>
+  </section>
+
+  <!-- Send to Tab -->
+  <section>
+    <h2>Send to Tab</h2>
+    <div class="row">
+      <input type="number" id="input-send-id" placeholder="Tab ID">
+      <button id="btn-send-tab">Send highlight</button>
+    </div>
+    <div class="result" id="res-send-tab"></div>
+  </section>
+
+  <!-- Event Log -->
+  <section id="event-log">
+    <h2>Event Log</h2>
+    <div class="row">
+      <button id="btn-refresh-log">Refresh Log</button>
+    </div>
+    <div class="result" id="res-event-log"></div>
+  </section>
+
+  <script src="popup.js"></script>
+</body>
+</html>

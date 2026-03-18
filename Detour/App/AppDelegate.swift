@@ -255,6 +255,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let developMenuItem = NSMenuItem()
         mainMenu.addItem(developMenuItem)
         let developMenu = NSMenu(title: "Develop")
+        developMenu.delegate = self
         let inspectorItem = developMenu.addItem(withTitle: "Web Inspector", action: #selector(BrowserWindowController.showWebInspector(_:)), keyEquivalent: "i")
         inspectorItem.keyEquivalentModifierMask = [.command, .option]
         developMenu.addItem(.separator())
@@ -271,5 +272,73 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
+    }
+
+    // MARK: - Extension Inspector
+
+    /// Tag used to identify dynamically-added extension inspector menu items.
+    private static let extensionInspectorTag = 9000
+
+    /// Hidden windows that host background webViews so the inspector can attach.
+    private var inspectorWindows: [String: NSWindow] = [:]
+
+    @objc func inspectExtensionBackground(_ sender: NSMenuItem) {
+        guard let extID = sender.representedObject as? String,
+              let bgHost = ExtensionManager.shared.backgroundHost(for: extID),
+              let webView = bgHost.webView else { return }
+
+        // The inspector requires the webView to be in a window hierarchy.
+        if webView.window == nil {
+            let window = NSWindow(
+                contentRect: .zero,
+                styleMask: [],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = webView
+            window.orderOut(nil)
+            inspectorWindows[extID] = window
+        }
+
+        DispatchQueue.main.async {
+            guard let inspector = webView.value(forKey: "_inspector") as? NSObject else { return }
+            inspector.perform(Selector(("show")))
+        }
+    }
+}
+
+// MARK: - NSMenuDelegate
+
+extension AppDelegate: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu.title == "Develop" else { return }
+
+        // Remove previous extension inspector items
+        menu.items
+            .filter { $0.tag == AppDelegate.extensionInspectorTag }
+            .forEach { menu.removeItem($0) }
+
+        let extensions = ExtensionManager.shared.enabledExtensions
+        print("[Inspector] menuNeedsUpdate: \(extensions.count) enabled extensions")
+        for ext in extensions {
+            print("[Inspector]   - \(ext.manifest.name) (id: \(ext.id))")
+        }
+        guard !extensions.isEmpty else { return }
+
+        let separator = NSMenuItem.separator()
+        separator.tag = AppDelegate.extensionInspectorTag
+        menu.addItem(separator)
+
+        for ext in extensions {
+            let item = NSMenuItem(
+                title: "Inspect \"\(ext.manifest.name)\" Background",
+                action: #selector(inspectExtensionBackground(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = ext.id
+            item.tag = AppDelegate.extensionInspectorTag
+            menu.addItem(item)
+        }
     }
 }
