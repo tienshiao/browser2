@@ -119,8 +119,9 @@ class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource, NS
         boxBottomToScroll = scrollView.bottomAnchor.constraint(equalTo: box.bottomAnchor)
 
         centerXConstraint = glassContainer.centerXAnchor.constraint(equalTo: safeAreaLayoutGuide.centerXAnchor)
+        let maxPaletteHeight: CGFloat = 12 + 24 + 8 + 1 + 6 * rowHeight  // top pad + textfield + gap + separator + max suggestions
         centerYConstraint = NSLayoutConstraint(item: glassContainer, attribute: .top, relatedBy: .equal,
-                               toItem: self, attribute: .bottom, multiplier: 0.35, constant: 0)
+                               toItem: self, attribute: .bottom, multiplier: 0.5, constant: -maxPaletteHeight / 2)
 
         NSLayoutConstraint.activate([
             centerXConstraint,
