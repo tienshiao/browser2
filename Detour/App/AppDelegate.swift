@@ -72,6 +72,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             do {
+                // Parse manifest first to show permission prompt
+                let manifestURL = url.appendingPathComponent("manifest.json")
+                let manifest = try ExtensionManifest.parse(at: manifestURL)
+
+                let summary = ExtensionPermissionChecker.permissionSummary(for: manifest)
+
+                let confirmAlert = NSAlert()
+                confirmAlert.messageText = "Install \"\(manifest.name)\"?"
+                if summary.isEmpty {
+                    confirmAlert.informativeText = "This extension does not request any special permissions."
+                } else {
+                    let bullets = summary.map { "\u{2022} \($0)" }.joined(separator: "\n")
+                    confirmAlert.informativeText = "This extension requests:\n\(bullets)"
+                }
+                confirmAlert.alertStyle = .warning
+                confirmAlert.addButton(withTitle: "Install")
+                confirmAlert.addButton(withTitle: "Cancel")
+
+                guard confirmAlert.runModal() == .alertFirstButtonReturn else { return }
+
                 let ext = try ExtensionManager.shared.install(from: url)
                 // Refresh toolbars on all windows
                 for wc in self.windowControllers {

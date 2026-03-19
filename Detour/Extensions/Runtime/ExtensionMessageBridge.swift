@@ -28,6 +28,23 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
               let extensionID = body["extensionID"] as? String,
               let type = body["type"] as? String else { return }
 
+        // Centralized permission gate
+        let callbackID = body["callbackID"] as? String
+        let isContentScript = body["isContentScript"] as? Bool ?? true
+
+        if let requiredPermission = ExtensionPermissionChecker.requiredPermission(for: type) {
+            guard let ext = ExtensionManager.shared.extension(withID: extensionID),
+                  ExtensionPermissionChecker.hasPermission(requiredPermission, extension: ext) else {
+                if let cbID = callbackID {
+                    let errorMsg = ExtensionPermissionChecker.apiPermissionError(
+                        permission: requiredPermission, api: type)
+                    deliverCallbackResponse(callbackID: cbID, result: ["__error": errorMsg],
+                        extensionID: extensionID, webView: message.webView, isContentScript: isContentScript)
+                }
+                return
+            }
+        }
+
         switch type {
         case "runtime.sendMessage":
             handleSendMessage(body: body, extensionID: extensionID, sourceWebView: message.webView)
@@ -456,6 +473,14 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             return
         }
 
+        // Host permission check
+        if let tabURL = tab.url, !ExtensionPermissionChecker.hasHostPermission(for: tabURL, extension: ext) {
+            deliverCallbackResponse(callbackID: callbackID,
+                result: ["__error": ExtensionPermissionChecker.hostPermissionError(url: tabURL)],
+                extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            return
+        }
+
         guard let messageData = try? JSONSerialization.data(withJSONObject: message),
               let messageJSON = String(data: messageData, encoding: .utf8) else { return }
 
@@ -498,6 +523,14 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         guard let tab, let webView = tab.webView else {
             deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Tab has no webView"],
                                     extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            return
+        }
+
+        // Host permission check for programmatic script injection
+        if let tabURL = tab.url, !ExtensionPermissionChecker.hasHostPermission(for: tabURL, extension: ext) {
+            deliverCallbackResponse(callbackID: callbackID,
+                result: ["__error": ExtensionPermissionChecker.hostPermissionError(url: tabURL)],
+                extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
             return
         }
 
@@ -562,6 +595,14 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         guard let tab, let webView = tab.webView else {
             deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Tab has no webView"],
                                     extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            return
+        }
+
+        // Host permission check for programmatic CSS injection
+        if let tabURL = tab.url, !ExtensionPermissionChecker.hasHostPermission(for: tabURL, extension: ext) {
+            deliverCallbackResponse(callbackID: callbackID,
+                result: ["__error": ExtensionPermissionChecker.hostPermissionError(url: tabURL)],
+                extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
             return
         }
 

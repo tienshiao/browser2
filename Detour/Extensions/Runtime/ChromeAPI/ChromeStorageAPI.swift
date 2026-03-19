@@ -11,13 +11,17 @@ struct ChromeStorageAPI {
             const extensionID = '\(extensionID)';
 
             function storageRequest(action, params) {
-                return new Promise(function(resolve) {
+                return new Promise(function(resolve, reject) {
                     const callbackID = 'storage_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 
                     if (!window.__extensionCallbacks) window.__extensionCallbacks = {};
                     window.__extensionCallbacks[callbackID] = function(result) {
                         delete window.__extensionCallbacks[callbackID];
-                        resolve(result);
+                        if (result && result.__error) {
+                            reject(new Error(result.__error));
+                        } else {
+                            resolve(result);
+                        }
                     };
 
                     window.webkit.messageHandlers.extensionMessage.postMessage({

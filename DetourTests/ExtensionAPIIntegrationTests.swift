@@ -39,7 +39,8 @@ final class ExtensionAPIIntegrationTests: XCTestCase {
             "name": "API Test Extension",
             "version": "1.2.3",
             "description": "Tests chrome API surface",
-            "permissions": ["storage"],
+            "permissions": ["storage", "tabs", "scripting"],
+            "host_permissions": ["<all_urls>"],
             "background": {"service_worker": "background.js"},
             "content_scripts": [
                 {"matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_end"}
