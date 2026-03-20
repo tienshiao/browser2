@@ -1461,7 +1461,7 @@ extension BrowserWindowController: ExtensionToolbarActions {
               ext.popupURL != nil else { return }
 
         let popover = ExtensionPopoverController(extension: ext)
-        popover.show(relativeTo: button.bounds, of: button)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
         // Retain the popover controller until it closes
         objc_setAssociatedObject(self, "extensionPopover", popover, .OBJC_ASSOCIATION_RETAIN)
     }

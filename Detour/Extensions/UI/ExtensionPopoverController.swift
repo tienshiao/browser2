@@ -7,13 +7,17 @@ class ExtensionPopoverController: NSObject {
     private let ext: WebExtension
     private var popover: NSPopover?
     private(set) var webView: WKWebView?
-    private var contentSizeObservation: NSKeyValueObservation?
 
     /// Chrome's maximum popup dimensions.
     private static let maxWidth: CGFloat = 800
     private static let maxHeight: CGFloat = 600
-    /// Default size used before the content determines its preferred size.
+    /// Default size used if content measurement fails.
     private static let defaultSize = NSSize(width: 360, height: 480)
+
+    // Positioning info saved from show() for deferred popover presentation
+    private weak var positioningView: NSView?
+    private var positioningRect: NSRect = .zero
+    private var preferredEdge: NSRectEdge = .maxY
 
     init(extension ext: WebExtension) {
         self.ext = ext
@@ -21,8 +25,15 @@ class ExtensionPopoverController: NSObject {
     }
 
     /// Show the extension popup relative to the given toolbar item view.
-    func show(relativeTo positioningRect: NSRect, of positioningView: NSView, preferredEdge: NSRectEdge = .minY) {
+    /// Creates the WKWebView and starts loading immediately, but defers showing
+    /// the popover until the content has loaded and been measured.
+    func show(relativeTo positioningRect: NSRect, of positioningView: NSView, preferredEdge: NSRectEdge = .maxY) {
         guard let popupURL = ext.popupURL else { return }
+
+        // Save positioning for when we're ready to present
+        self.positioningView = positioningView
+        self.positioningRect = positioningRect
+        self.preferredEdge = preferredEdge
 
         let config = ext.makePageConfiguration()
 
@@ -34,34 +45,25 @@ class ExtensionPopoverController: NSObject {
         wv.load(URLRequest(url: popupURL))
         self.webView = wv
 
-        // Register the popup webView so the message bridge can dispatch messages to it
+        // Register the popup webView so the message bridge can dispatch messages
+        // to it even before the popover is shown (background may send during load)
         ExtensionManager.shared.registerPopupWebView(wv, for: ext.id)
-
-        let viewController = NSViewController()
-        viewController.view = wv
-
-        let pop = NSPopover()
-        pop.contentViewController = viewController
-        pop.contentSize = Self.defaultSize
-        pop.behavior = .transient
-        pop.delegate = self
-        self.popover = pop
-
-        pop.show(relativeTo: positioningRect, of: positioningView, preferredEdge: preferredEdge)
     }
 
     func close() {
         popover?.close()
     }
 
-    /// Query the popup's content size from the rendered DOM and resize the popover.
-    private func resizeToFitContent() {
-        guard let wv = webView, let pop = popover else { return }
+    /// Measure the content and present the popover at the correct size.
+    private func measureAndPresent() {
+        guard let wv = webView, positioningView != nil else {
+            presentPopover(size: Self.defaultSize)
+            return
+        }
 
         let js = """
         (function() {
             const body = document.body;
-            const html = document.documentElement;
             if (!body) return JSON.stringify({width: 0, height: 0});
             const style = window.getComputedStyle(body);
             const marginH = parseFloat(style.marginLeft) + parseFloat(style.marginRight);
@@ -73,20 +75,41 @@ class ExtensionPopoverController: NSObject {
         """
 
         wv.evaluateJavaScript(js) { [weak self] result, _ in
-            guard let self, let pop = self.popover,
-                  let jsonString = result as? String,
-                  let data = jsonString.data(using: .utf8),
-                  let size = try? JSONSerialization.jsonObject(with: data) as? [String: CGFloat],
-                  let w = size["width"], let h = size["height"],
-                  w > 0, h > 0 else { return }
+            guard let self else { return }
 
-            let clampedWidth = min(max(w, 100), Self.maxWidth)
-            let clampedHeight = min(max(h, 100), Self.maxHeight)
-            let newSize = NSSize(width: clampedWidth, height: clampedHeight)
+            var size = Self.defaultSize
+            if let jsonString = result as? String,
+               let data = jsonString.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: CGFloat],
+               let w = parsed["width"], let h = parsed["height"],
+               w > 0, h > 0 {
+                size = NSSize(
+                    width: min(max(w, 100), Self.maxWidth),
+                    height: min(max(h, 100), Self.maxHeight)
+                )
+            }
 
-            pop.contentSize = newSize
-            wv.frame.size = newSize
+            self.presentPopover(size: size)
         }
+    }
+
+    /// Create and show the NSPopover at the given size.
+    private func presentPopover(size: NSSize) {
+        guard let wv = webView, let posView = positioningView, popover == nil else { return }
+
+        wv.frame.size = size
+
+        let viewController = NSViewController()
+        viewController.view = wv
+
+        let pop = NSPopover()
+        pop.contentViewController = viewController
+        pop.contentSize = size
+        pop.behavior = .transient
+        pop.delegate = self
+        self.popover = pop
+
+        pop.show(relativeTo: positioningRect, of: posView, preferredEdge: preferredEdge)
     }
 }
 
@@ -100,10 +123,10 @@ extension ExtensionPopoverController: NSPopoverDelegate {
 
 extension ExtensionPopoverController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // After the page loads, measure the content and resize the popover to fit.
-        // Use a short delay to allow the extension's JS to render the DOM.
+        // After the page loads, wait briefly for the extension's JS to render the DOM,
+        // then measure the content and show the popover at the correct size.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.resizeToFitContent()
+            self?.measureAndPresent()
         }
     }
 
@@ -117,7 +140,6 @@ extension ExtensionPopoverController: WKNavigationDelegate {
         // Open external links (target=_blank or regular clicks to http(s) URLs) in the browser
         if let url = navigationAction.request.url, url.scheme == "https" || url.scheme == "http" {
             decisionHandler(.cancel)
-            // Post a notification or open in a new tab
             NotificationCenter.default.post(
                 name: ExtensionManager.popupOpenURLNotification,
                 object: nil,
