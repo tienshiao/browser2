@@ -13,21 +13,10 @@ struct ChromeWebNavigationAPI {
             var onCompletedListeners = [];
             var onErrorOccurredListeners = [];
 
-            function makeEventEmitter(listeners) {
-                return {
-                    addListener: function(cb) { listeners.push(cb); },
-                    removeListener: function(cb) {
-                        var idx = listeners.indexOf(cb);
-                        if (idx !== -1) listeners.splice(idx, 1);
-                    },
-                    hasListener: function(cb) { return listeners.includes(cb); }
-                };
-            }
-
-            chrome.webNavigation.onBeforeNavigate = makeEventEmitter(onBeforeNavigateListeners);
-            chrome.webNavigation.onCommitted = makeEventEmitter(onCommittedListeners);
-            chrome.webNavigation.onCompleted = makeEventEmitter(onCompletedListeners);
-            chrome.webNavigation.onErrorOccurred = makeEventEmitter(onErrorOccurredListeners);
+            chrome.webNavigation.onBeforeNavigate = __detourMakeEventEmitter(onBeforeNavigateListeners);
+            chrome.webNavigation.onCommitted = __detourMakeEventEmitter(onCommittedListeners);
+            chrome.webNavigation.onCompleted = __detourMakeEventEmitter(onCompletedListeners);
+            chrome.webNavigation.onErrorOccurred = __detourMakeEventEmitter(onErrorOccurredListeners);
 
             // Internal: called by native bridge to dispatch webNavigation events
             window.__extensionDispatchWebNavEvent = function(eventName, details) {

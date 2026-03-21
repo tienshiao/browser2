@@ -37,14 +37,7 @@ struct ChromeCommandsAPI {
                 });
             };
 
-            chrome.commands.onCommand = {
-                addListener: function(cb) { onCommandListeners.push(cb); },
-                removeListener: function(cb) {
-                    const idx = onCommandListeners.indexOf(cb);
-                    if (idx !== -1) onCommandListeners.splice(idx, 1);
-                },
-                hasListener: function(cb) { return onCommandListeners.includes(cb); }
-            };
+            chrome.commands.onCommand = __detourMakeEventEmitter(onCommandListeners);
 
             // Internal: called by native bridge to dispatch command events
             window.__extensionDispatchCommand = function(commandName) {

@@ -4,18 +4,23 @@ import WebKit
 /// Hosts a hidden WKWebView for an extension's background service worker.
 /// The webView loads a synthetic HTML page that includes the chrome API polyfills
 /// and the extension's background script.
-class BackgroundHost {
+class BackgroundHost: NSObject, WKNavigationDelegate {
     let extensionID: String
     private(set) var webView: WKWebView?
     private let ext: WebExtension
+    private(set) var isLoaded = false
+    private var loadCompletionHandlers: [() -> Void] = []
 
     init(extension ext: WebExtension) {
         self.extensionID = ext.id
         self.ext = ext
+        super.init()
     }
 
     /// Start the background host by creating a hidden WKWebView and loading the background script.
-    func start(isFirstRun: Bool = true) {
+    /// The optional completion handler fires after the page finishes loading, ensuring the
+    /// chrome API polyfills and background script are ready to receive messages.
+    func start(isFirstRun: Bool = true, completion: (() -> Void)? = nil) {
         guard let serviceWorker = ext.manifest.background?.serviceWorker else { return }
 
         let config = ext.makePageConfiguration()
@@ -23,7 +28,10 @@ class BackgroundHost {
 
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.isInspectable = true
+        wv.navigationDelegate = self
         self.webView = wv
+
+        if let completion { loadCompletionHandlers.append(completion) }
 
         // Read the background script and inline it, since loadHTMLString with a
         // file baseURL may not grant the web process access to load relative scripts.
@@ -61,6 +69,17 @@ class BackgroundHost {
     func stop() {
         webView?.stopLoading()
         webView = nil
+        isLoaded = false
+        loadCompletionHandlers.removeAll()
+    }
+
+    // MARK: - WKNavigationDelegate
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        isLoaded = true
+        let handlers = loadCompletionHandlers
+        loadCompletionHandlers.removeAll()
+        handlers.forEach { $0() }
     }
 
     /// Evaluate JavaScript in the background webView.

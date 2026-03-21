@@ -89,21 +89,12 @@ struct ChromeWindowsAPI {
                 return promise;
             };
 
-            chrome.windows.onCreated = {
-                addListener: function(cb) {},
-                removeListener: function(cb) {},
-                hasListener: function(cb) { return false; }
-            };
-            chrome.windows.onRemoved = {
-                addListener: function(cb) {},
-                removeListener: function(cb) {},
-                hasListener: function(cb) { return false; }
-            };
-            chrome.windows.onFocusChanged = {
-                addListener: function(cb) {},
-                removeListener: function(cb) {},
-                hasListener: function(cb) { return false; }
-            };
+            var _onCreatedListeners = [];
+            var _onRemovedListeners = [];
+            var _onFocusChangedListeners = [];
+            chrome.windows.onCreated = __detourMakeEventEmitter(_onCreatedListeners);
+            chrome.windows.onRemoved = __detourMakeEventEmitter(_onRemovedListeners);
+            chrome.windows.onFocusChanged = __detourMakeEventEmitter(_onFocusChangedListeners);
         })();
         """
     }

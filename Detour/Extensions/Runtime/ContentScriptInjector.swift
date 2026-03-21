@@ -194,10 +194,7 @@ class ContentScriptInjector {
             for cssFile in csGroup.cssFiles {
                 let cssURL = ext.basePath.appendingPathComponent(cssFile)
                 guard let cssContent = try? String(contentsOf: cssURL, encoding: .utf8) else { continue }
-                let escapedCSS = cssContent
-                    .replacingOccurrences(of: "\\", with: "\\\\")
-                    .replacingOccurrences(of: "'", with: "\\'")
-                    .replacingOccurrences(of: "\n", with: "\\n")
+                let escapedCSS = cssContent.jsEscapedForSingleQuotes
 
                 let cssJS = """
                 if (\(guard_)) {
@@ -230,10 +227,7 @@ class ContentScriptInjector {
                     // document.currentScript.dataset.arg for its "regular path".
                     // Also, this ensures custom events dispatched from the ISOLATED world
                     // can reach MAIN world listeners, since both share the page's Document.
-                    let escapedJS = jsContent
-                        .replacingOccurrences(of: "\\", with: "\\\\")
-                        .replacingOccurrences(of: "`", with: "\\`")
-                        .replacingOccurrences(of: "${", with: "\\${")
+                    let escapedJS = jsContent.jsEscapedForTemplateLiteral
                     wrappedJS = """
                     if (\(guard_)) {
                         (function() {
@@ -310,10 +304,7 @@ class ContentScriptInjector {
             for cssFile in csGroup.cssFiles {
                 let cssURL = ext.basePath.appendingPathComponent(cssFile)
                 guard let cssContent = try? String(contentsOf: cssURL, encoding: .utf8) else { continue }
-                let escapedCSS = cssContent
-                    .replacingOccurrences(of: "\\", with: "\\\\")
-                    .replacingOccurrences(of: "'", with: "\\'")
-                    .replacingOccurrences(of: "\n", with: "\\n")
+                let escapedCSS = cssContent.jsEscapedForSingleQuotes
 
                 let cssJS = """
                 (function() {

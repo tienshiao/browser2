@@ -16,17 +16,24 @@ class EventRelayHandler: NSObject, WKScriptMessageHandler {
     /// Content worlds to relay events into.
     private var contentWorlds: [WKContentWorld] = []
 
+    /// Controllers that already have the handler registered. Weak to avoid retaining deallocated controllers.
+    private var registeredControllers = NSHashTable<WKUserContentController>.weakObjects()
+
     private override init() {
         super.init()
     }
 
     /// Register the relay on a WKUserContentController for a given extension content world.
     /// The handler is registered in the `.page` world so page-world scripts can post to it.
+    /// Safe to call multiple times for the same controller.
     func register(on controller: WKUserContentController, contentWorld: WKContentWorld) {
         if !contentWorlds.contains(where: { $0 === contentWorld }) {
             contentWorlds.append(contentWorld)
         }
-        controller.add(self, contentWorld: .page, name: Self.handlerName)
+        if !registeredControllers.contains(controller) {
+            controller.add(self, contentWorld: .page, name: Self.handlerName)
+            registeredControllers.add(controller)
+        }
     }
 
     /// Remove a content world (e.g. when an extension is disabled).
@@ -68,15 +75,14 @@ class EventRelayHandler: NSObject, WKScriptMessageHandler {
             detailJSON = "null"
         }
 
-        let escapedType = type.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
+        let escapedType = type.jsEscapedForSingleQuotes
 
         // Pass the target element's relay ID so the content world can dispatch
         // the event on the correct DOM element (not just on document).
         let targetRelayId = body["targetRelayId"] as? String
         let targetArg: String
         if let id = targetRelayId {
-            let escapedId = id.replacingOccurrences(of: "'", with: "\\'")
+            let escapedId = id.jsEscapedForSingleQuotes
             targetArg = "'\(escapedId)'"
         } else {
             targetArg = "null"

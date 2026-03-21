@@ -78,32 +78,10 @@ struct ChromeRuntimeAPI {
                 });
             };
 
-            chrome.runtime.onMessage = {
-                addListener: function(callback) {
-                    messageListeners.push(callback);
-                },
-                removeListener: function(callback) {
-                    const idx = messageListeners.indexOf(callback);
-                    if (idx !== -1) messageListeners.splice(idx, 1);
-                },
-                hasListener: function(callback) {
-                    return messageListeners.includes(callback);
-                }
-            };
+            chrome.runtime.onMessage = __detourMakeEventEmitter(messageListeners);
 
             // runtime.onInstalled
-            chrome.runtime.onInstalled = {
-                addListener: function(callback) {
-                    onInstalledListeners.push(callback);
-                },
-                removeListener: function(callback) {
-                    var idx = onInstalledListeners.indexOf(callback);
-                    if (idx !== -1) onInstalledListeners.splice(idx, 1);
-                },
-                hasListener: function(callback) {
-                    return onInstalledListeners.includes(callback);
-                }
-            };
+            chrome.runtime.onInstalled = __detourMakeEventEmitter(onInstalledListeners);
 
             // Internal: called by native bridge to fire onInstalled
             window.__extensionDispatchOnInstalled = function(details) {
@@ -205,18 +183,7 @@ struct ChromeRuntimeAPI {
                 return port;
             };
 
-            chrome.runtime.onConnect = {
-                addListener: function(callback) {
-                    onConnectListeners.push(callback);
-                },
-                removeListener: function(callback) {
-                    var idx = onConnectListeners.indexOf(callback);
-                    if (idx !== -1) onConnectListeners.splice(idx, 1);
-                },
-                hasListener: function(callback) {
-                    return onConnectListeners.includes(callback);
-                }
-            };
+            chrome.runtime.onConnect = __detourMakeEventEmitter(onConnectListeners);
 
             // Internal: called by native bridge when a port connection is initiated from another context
             window.__extensionDispatchConnect = function(portID, name) {
@@ -306,18 +273,7 @@ struct ChromeRuntimeAPI {
 
             // runtime.onStartup
             var onStartupListeners = [];
-            chrome.runtime.onStartup = {
-                addListener: function(callback) {
-                    onStartupListeners.push(callback);
-                },
-                removeListener: function(callback) {
-                    var idx = onStartupListeners.indexOf(callback);
-                    if (idx !== -1) onStartupListeners.splice(idx, 1);
-                },
-                hasListener: function(callback) {
-                    return onStartupListeners.includes(callback);
-                }
-            };
+            chrome.runtime.onStartup = __detourMakeEventEmitter(onStartupListeners);
 
             // Internal: called by native bridge to fire onStartup
             window.__extensionDispatchOnStartup = function() {

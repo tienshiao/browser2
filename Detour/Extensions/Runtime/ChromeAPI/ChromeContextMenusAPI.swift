@@ -61,14 +61,7 @@ struct ChromeContextMenusAPI {
                 return promise;
             };
 
-            chrome.contextMenus.onClicked = {
-                addListener: function(cb) { onClickedListeners.push(cb); },
-                removeListener: function(cb) {
-                    var idx = onClickedListeners.indexOf(cb);
-                    if (idx !== -1) onClickedListeners.splice(idx, 1);
-                },
-                hasListener: function(cb) { return onClickedListeners.includes(cb); }
-            };
+            chrome.contextMenus.onClicked = __detourMakeEventEmitter(onClickedListeners);
 
             // Internal: called by native bridge to dispatch context menu click events
             window.__extensionDispatchContextMenuClicked = function(info, tab) {

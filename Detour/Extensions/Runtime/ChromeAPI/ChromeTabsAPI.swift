@@ -96,21 +96,10 @@ struct ChromeTabsAPI {
             var onUpdatedListeners = [];
             var onActivatedListeners = [];
 
-            function makeEventEmitter(listeners) {
-                return {
-                    addListener: function(cb) { listeners.push(cb); },
-                    removeListener: function(cb) {
-                        var idx = listeners.indexOf(cb);
-                        if (idx !== -1) listeners.splice(idx, 1);
-                    },
-                    hasListener: function(cb) { return listeners.includes(cb); }
-                };
-            }
-
-            chrome.tabs.onCreated = makeEventEmitter(onCreatedListeners);
-            chrome.tabs.onRemoved = makeEventEmitter(onRemovedListeners);
-            chrome.tabs.onUpdated = makeEventEmitter(onUpdatedListeners);
-            chrome.tabs.onActivated = makeEventEmitter(onActivatedListeners);
+            chrome.tabs.onCreated = __detourMakeEventEmitter(onCreatedListeners);
+            chrome.tabs.onRemoved = __detourMakeEventEmitter(onRemovedListeners);
+            chrome.tabs.onUpdated = __detourMakeEventEmitter(onUpdatedListeners);
+            chrome.tabs.onActivated = __detourMakeEventEmitter(onActivatedListeners);
 
             // Internal: called by native bridge to dispatch tab events
             window.__extensionDispatchTabEvent = function(eventName, data) {

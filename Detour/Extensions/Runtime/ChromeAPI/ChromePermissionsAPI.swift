@@ -58,17 +58,10 @@ struct ChromePermissionsAPI {
                 return Promise.resolve(result);
             };
 
-            chrome.permissions.onAdded = {
-                addListener: function(cb) {},
-                removeListener: function(cb) {},
-                hasListener: function(cb) { return false; }
-            };
-
-            chrome.permissions.onRemoved = {
-                addListener: function(cb) {},
-                removeListener: function(cb) {},
-                hasListener: function(cb) { return false; }
-            };
+            var _onAddedListeners = [];
+            var _onRemovedListeners = [];
+            chrome.permissions.onAdded = __detourMakeEventEmitter(_onAddedListeners);
+            chrome.permissions.onRemoved = __detourMakeEventEmitter(_onRemovedListeners);
         })();
         """
     }

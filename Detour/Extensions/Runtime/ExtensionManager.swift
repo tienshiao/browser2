@@ -184,8 +184,12 @@ class ExtensionManager {
     func install(from sourceURL: URL) throws -> WebExtension {
         let ext = try ExtensionInstaller.install(from: sourceURL)
         extensions.append(ext)
-        startBackground(for: ext)
-        injectIntoExistingTabs(extension: ext)
+        // Wait for the background host to finish loading before injecting content scripts.
+        // Content scripts may send runtime.sendMessage immediately, which requires the
+        // background's __extensionDispatchMessage handler to be ready.
+        startBackground(for: ext) { [weak self] in
+            self?.injectIntoExistingTabs(extension: ext)
+        }
         invalidateEnabledExtensionsCache()
         NotificationCenter.default.post(name: Self.extensionsDidChangeNotification, object: nil)
         return ext
@@ -241,9 +245,21 @@ class ExtensionManager {
 
     /// Uninstall an extension.
     func uninstall(id: String) {
-        // Open uninstall URL if set
+        // Open uninstall URL in a new Detour tab if set
         if let uninstallURL = uninstallURLs[id] {
-            NSWorkspace.shared.open(uninstallURL)
+            if let activeSpaceID = lastActiveSpaceID,
+               let space = TabStore.shared.space(withID: activeSpaceID) {
+                let tab = TabStore.shared.addTab(in: space, url: uninstallURL)
+                space.selectedTabID = tab.id
+                NotificationCenter.default.post(
+                    name: Self.tabShouldSelectNotification,
+                    object: nil,
+                    userInfo: ["tabID": tab.id, "spaceID": space.id]
+                )
+            } else if let space = TabStore.shared.spaces.first {
+                let tab = TabStore.shared.addTab(in: space, url: uninstallURL)
+                space.selectedTabID = tab.id
+            }
         }
 
         stopBackground(for: id)
@@ -357,11 +373,14 @@ class ExtensionManager {
 
     // MARK: - Background Host Management
 
-    func startBackground(for ext: WebExtension, isFirstRun: Bool = true) {
-        guard ext.manifest.background?.serviceWorker != nil else { return }
+    func startBackground(for ext: WebExtension, isFirstRun: Bool = true, completion: (() -> Void)? = nil) {
+        guard ext.manifest.background?.serviceWorker != nil else {
+            completion?()
+            return
+        }
         let host = BackgroundHost(extension: ext)
         backgroundHosts[ext.id] = host
-        host.start(isFirstRun: isFirstRun)
+        host.start(isFirstRun: isFirstRun, completion: completion)
     }
 
     private func stopBackground(for extensionID: String) {

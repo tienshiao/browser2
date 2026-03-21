@@ -38,14 +38,7 @@ struct ChromeStorageAPI {
             const localOnChangedListeners = [];
             const syncOnChangedListeners = [];
 
-            chrome.storage.onChanged = {
-                addListener: function(cb) { onChangedListeners.push(cb); },
-                removeListener: function(cb) {
-                    const idx = onChangedListeners.indexOf(cb);
-                    if (idx !== -1) onChangedListeners.splice(idx, 1);
-                },
-                hasListener: function(cb) { return onChangedListeners.includes(cb); }
-            };
+            chrome.storage.onChanged = __detourMakeEventEmitter(onChangedListeners);
 
             // Internal: called by native bridge to dispatch storage change events
             window.__extensionDispatchStorageChanged = function(changes, areaName) {
@@ -113,25 +106,11 @@ struct ChromeStorageAPI {
             }
 
             chrome.storage.local = makeStorageArea('');
-            chrome.storage.local.onChanged = {
-                addListener: function(cb) { localOnChangedListeners.push(cb); },
-                removeListener: function(cb) {
-                    const idx = localOnChangedListeners.indexOf(cb);
-                    if (idx !== -1) localOnChangedListeners.splice(idx, 1);
-                },
-                hasListener: function(cb) { return localOnChangedListeners.includes(cb); }
-            };
+            chrome.storage.local.onChanged = __detourMakeEventEmitter(localOnChangedListeners);
 
             chrome.storage.sync = makeStorageArea('sync.');
             chrome.storage.sync.QUOTA_BYTES_PER_ITEM = 8192;
-            chrome.storage.sync.onChanged = {
-                addListener: function(cb) { syncOnChangedListeners.push(cb); },
-                removeListener: function(cb) {
-                    const idx = syncOnChangedListeners.indexOf(cb);
-                    if (idx !== -1) syncOnChangedListeners.splice(idx, 1);
-                },
-                hasListener: function(cb) { return syncOnChangedListeners.includes(cb); }
-            };
+            chrome.storage.sync.onChanged = __detourMakeEventEmitter(syncOnChangedListeners);
 
             // chrome.storage.session: stub as in-memory storage (non-persistent, cleared on restart)
             let sessionData = {};

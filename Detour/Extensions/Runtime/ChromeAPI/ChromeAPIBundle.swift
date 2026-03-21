@@ -2,12 +2,31 @@ import Foundation
 
 /// Combines all chrome.* API polyfills into a single injectable JavaScript bundle.
 struct ChromeAPIBundle {
+    /// Shared event emitter factory injected before all API polyfills.
+    /// Creates a `{addListener, removeListener, hasListener}` object backed by the given array.
+    static let eventEmitterJS = """
+    (function() {
+        if (window.__detourMakeEventEmitter) return;
+        window.__detourMakeEventEmitter = function(listeners) {
+            return {
+                addListener: function(cb) { listeners.push(cb); },
+                removeListener: function(cb) {
+                    var idx = listeners.indexOf(cb);
+                    if (idx !== -1) listeners.splice(idx, 1);
+                },
+                hasListener: function(cb) { return listeners.includes(cb); }
+            };
+        };
+    })();
+    """
+
     /// Generate the full chrome API polyfill bundle for a given extension.
     /// - Parameter isContentScript: true for content scripts (injected in content world),
     ///   false for popup/background (injected in .page world). Controls how the bridge
     ///   routes responses back to the correct world.
     static func generateBundle(for ext: WebExtension, isContentScript: Bool = true) -> String {
         var parts: [String] = []
+        parts.append(eventEmitterJS)
         parts.append(ChromeRuntimeAPI.generateJS(extensionID: ext.id, manifest: ext.manifest, isContentScript: isContentScript))
         parts.append(ChromeStorageAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
         parts.append(ChromeTabsAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))

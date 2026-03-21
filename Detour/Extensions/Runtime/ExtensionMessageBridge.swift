@@ -1,11 +1,90 @@
 import Foundation
 import WebKit
 
+/// Message type constants for the extension bridge dispatch.
+private enum MsgType {
+    static let runtimeSendMessage = "runtime.sendMessage"
+    static let runtimeSendResponse = "runtime.sendResponse"
+    static let runtimeConnect = "runtime.connect"
+    static let runtimeOpenOptionsPage = "runtime.openOptionsPage"
+    static let runtimeSetUninstallURL = "runtime.setUninstallURL"
+
+    static let storageGet = "storage.get"
+    static let storageSet = "storage.set"
+    static let storageRemove = "storage.remove"
+    static let storageClear = "storage.clear"
+    static let storageSyncGet = "storage.sync.get"
+    static let storageSyncSet = "storage.sync.set"
+    static let storageSyncRemove = "storage.sync.remove"
+    static let storageSyncClear = "storage.sync.clear"
+
+    static let tabsQuery = "tabs.query"
+    static let tabsCreate = "tabs.create"
+    static let tabsUpdate = "tabs.update"
+    static let tabsRemove = "tabs.remove"
+    static let tabsGet = "tabs.get"
+    static let tabsSendMessage = "tabs.sendMessage"
+    static let tabsDetectLanguage = "tabs.detectLanguage"
+
+    static let scriptingExecuteScript = "scripting.executeScript"
+    static let scriptingInsertCSS = "scripting.insertCSS"
+
+    static let contextMenusCreate = "contextMenus.create"
+    static let contextMenusUpdate = "contextMenus.update"
+    static let contextMenusRemove = "contextMenus.remove"
+    static let contextMenusRemoveAll = "contextMenus.removeAll"
+
+    static let offscreenCreateDocument = "offscreen.createDocument"
+    static let offscreenCloseDocument = "offscreen.closeDocument"
+    static let offscreenHasDocument = "offscreen.hasDocument"
+
+    static let portPostMessage = "port.postMessage"
+    static let portDisconnect = "port.disconnect"
+
+    static let resourceGet = "resource.get"
+
+    static let actionSetIcon = "action.setIcon"
+    static let actionSetBadgeText = "action.setBadgeText"
+    static let actionSetBadgeBackgroundColor = "action.setBadgeBackgroundColor"
+    static let actionGetBadgeText = "action.getBadgeText"
+    static let actionSetTitle = "action.setTitle"
+    static let actionGetTitle = "action.getTitle"
+    static let actionSetPopup = "action.setPopup"
+
+    static let commandsGetAll = "commands.getAll"
+
+    static let windowsGetAll = "windows.getAll"
+    static let windowsGet = "windows.get"
+    static let windowsGetCurrent = "windows.getCurrent"
+    static let windowsCreate = "windows.create"
+    static let windowsUpdate = "windows.update"
+
+    static let fontSettingsGetFontList = "fontSettings.getFontList"
+    static let permissionsContains = "permissions.contains"
+}
+
 /// Routes messages between content scripts, background scripts, and native code.
 /// Registered as `WKScriptMessageHandler` for the "extensionMessage" handler name.
 class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
     static let shared = ExtensionMessageBridge()
     static let handlerName = "extensionMessage"
+
+    private var messageCount = 0
+
+    /// Bundles the common context extracted from every incoming message.
+    private struct MessageContext {
+        let callbackID: String
+        let extensionID: String
+        let isContentScript: Bool
+        weak var sourceWebView: WKWebView?
+
+        static func from(body: [String: Any], extensionID: String, webView: WKWebView?) -> MessageContext? {
+            guard let callbackID = body["callbackID"] as? String else { return nil }
+            let isContentScript = body["isContentScript"] as? Bool ?? true
+            return MessageContext(callbackID: callbackID, extensionID: extensionID,
+                                 isContentScript: isContentScript, sourceWebView: webView)
+        }
+    }
 
     private override init() {
         super.init()
@@ -28,6 +107,12 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
               let extensionID = body["extensionID"] as? String,
               let type = body["type"] as? String else { return }
 
+        // Periodic cleanup of stale entries
+        messageCount += 1
+        if messageCount % 50 == 0 {
+            cleanupOrphanedResponses()
+            cleanupStaleCachedDocumentIds()
+        }
 
         // Centralized permission gate
         let callbackID = body["callbackID"] as? String
@@ -46,141 +131,185 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             }
         }
 
+        let ctx = MessageContext.from(body: body, extensionID: extensionID, webView: message.webView)
+
         switch type {
-        case "runtime.sendMessage":
-            handleSendMessage(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.runtimeSendMessage:
+            guard let ctx else { return }
+            handleSendMessage(ctx: ctx, body: body)
 
-        case "runtime.sendResponse":
-            handleSendResponse(body: body, extensionID: extensionID)
+        case MsgType.runtimeSendResponse:
+            guard let ctx else { return }
+            handleSendResponse(ctx: ctx, body: body)
 
-        case "storage.get":
-            handleStorageGet(body: body, extensionID: extensionID, sourceWebView: message.webView, keyPrefix: "", areaName: "local")
+        case MsgType.storageGet:
+            guard let ctx else { return }
+            handleStorageGet(ctx: ctx, body: body, keyPrefix: "", areaName: "local")
 
-        case "storage.set":
-            handleStorageSet(body: body, extensionID: extensionID, sourceWebView: message.webView, keyPrefix: "", areaName: "local")
+        case MsgType.storageSet:
+            guard let ctx else { return }
+            handleStorageSet(ctx: ctx, body: body, keyPrefix: "", areaName: "local")
 
-        case "storage.remove":
-            handleStorageRemove(body: body, extensionID: extensionID, sourceWebView: message.webView, keyPrefix: "", areaName: "local")
+        case MsgType.storageRemove:
+            guard let ctx else { return }
+            handleStorageRemove(ctx: ctx, body: body, keyPrefix: "", areaName: "local")
 
-        case "storage.clear":
-            handleStorageClear(body: body, extensionID: extensionID, sourceWebView: message.webView, keyPrefix: "", areaName: "local")
+        case MsgType.storageClear:
+            guard let ctx else { return }
+            handleStorageClear(ctx: ctx, body: body, keyPrefix: "", areaName: "local")
 
-        case "tabs.query":
-            handleTabsQuery(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.tabsQuery:
+            guard let ctx else { return }
+            handleTabsQuery(ctx: ctx, body: body)
 
-        case "tabs.create":
-            handleTabsCreate(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.tabsCreate:
+            guard let ctx else { return }
+            handleTabsCreate(ctx: ctx, body: body)
 
-        case "tabs.update":
-            handleTabsUpdate(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.tabsUpdate:
+            guard let ctx else { return }
+            handleTabsUpdate(ctx: ctx, body: body)
 
-        case "tabs.remove":
-            handleTabsRemove(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.tabsRemove:
+            guard let ctx else { return }
+            handleTabsRemove(ctx: ctx, body: body)
 
-        case "tabs.get":
-            handleTabsGet(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.tabsGet:
+            guard let ctx else { return }
+            handleTabsGet(ctx: ctx, body: body)
 
-        case "tabs.sendMessage":
-            handleTabsSendMessage(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.tabsSendMessage:
+            guard let ctx else { return }
+            handleTabsSendMessage(ctx: ctx, body: body)
 
-        case "scripting.executeScript":
-            handleScriptingExecuteScript(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.scriptingExecuteScript:
+            guard let ctx else { return }
+            handleScriptingExecuteScript(ctx: ctx, body: body)
 
-        case "scripting.insertCSS":
-            handleScriptingInsertCSS(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.scriptingInsertCSS:
+            guard let ctx else { return }
+            handleScriptingInsertCSS(ctx: ctx, body: body)
 
-        case "tabs.detectLanguage":
-            handleTabsDetectLanguage(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.tabsDetectLanguage:
+            guard let ctx else { return }
+            handleTabsDetectLanguage(ctx: ctx, body: body)
 
-        case "contextMenus.create":
-            handleContextMenusCreate(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.contextMenusCreate:
+            guard let ctx else { return }
+            handleContextMenusCreate(ctx: ctx, body: body)
 
-        case "contextMenus.update":
-            handleContextMenusUpdate(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.contextMenusUpdate:
+            guard let ctx else { return }
+            handleContextMenusUpdate(ctx: ctx, body: body)
 
-        case "contextMenus.remove":
-            handleContextMenusRemove(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.contextMenusRemove:
+            guard let ctx else { return }
+            handleContextMenusRemove(ctx: ctx, body: body)
 
-        case "contextMenus.removeAll":
-            handleContextMenusRemoveAll(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.contextMenusRemoveAll:
+            guard let ctx else { return }
+            handleContextMenusRemoveAll(ctx: ctx, body: body)
 
-        case "offscreen.createDocument":
-            handleOffscreenCreateDocument(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.offscreenCreateDocument:
+            guard let ctx else { return }
+            handleOffscreenCreateDocument(ctx: ctx, body: body)
 
-        case "offscreen.closeDocument":
-            handleOffscreenCloseDocument(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.offscreenCloseDocument:
+            guard let ctx else { return }
+            handleOffscreenCloseDocument(ctx: ctx, body: body)
 
-        case "offscreen.hasDocument":
-            handleOffscreenHasDocument(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.offscreenHasDocument:
+            guard let ctx else { return }
+            handleOffscreenHasDocument(ctx: ctx, body: body)
 
-        case "runtime.connect":
+        case MsgType.runtimeConnect:
             handleRuntimeConnect(body: body, extensionID: extensionID, sourceWebView: message.webView)
 
-        case "port.postMessage":
+        case MsgType.portPostMessage:
             handlePortPostMessage(body: body, extensionID: extensionID, sourceWebView: message.webView)
 
-        case "port.disconnect":
+        case MsgType.portDisconnect:
             handlePortDisconnect(body: body, extensionID: extensionID)
 
-        case "runtime.openOptionsPage":
-            handleRuntimeOpenOptionsPage(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.runtimeOpenOptionsPage:
+            handleRuntimeOpenOptionsPage(ctx: ctx, body: body)
 
-        case "resource.get":
-            handleResourceGet(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.resourceGet:
+            handleResourceGet(ctx: ctx, body: body)
 
         // Storage sync handlers
-        case "storage.sync.get":
-            handleStorageGet(body: body, extensionID: extensionID, sourceWebView: message.webView, keyPrefix: "sync:", areaName: "sync")
-        case "storage.sync.set":
-            handleStorageSet(body: body, extensionID: extensionID, sourceWebView: message.webView, keyPrefix: "sync:", areaName: "sync")
-        case "storage.sync.remove":
-            handleStorageRemove(body: body, extensionID: extensionID, sourceWebView: message.webView, keyPrefix: "sync:", areaName: "sync")
-        case "storage.sync.clear":
-            handleStorageClear(body: body, extensionID: extensionID, sourceWebView: message.webView, keyPrefix: "sync:", areaName: "sync")
+        case MsgType.storageSyncGet:
+            guard let ctx else { return }
+            handleStorageGet(ctx: ctx, body: body, keyPrefix: "sync:", areaName: "sync")
+        case MsgType.storageSyncSet:
+            guard let ctx else { return }
+            handleStorageSet(ctx: ctx, body: body, keyPrefix: "sync:", areaName: "sync")
+        case MsgType.storageSyncRemove:
+            guard let ctx else { return }
+            handleStorageRemove(ctx: ctx, body: body, keyPrefix: "sync:", areaName: "sync")
+        case MsgType.storageSyncClear:
+            guard let ctx else { return }
+            handleStorageClear(ctx: ctx, body: body, keyPrefix: "sync:", areaName: "sync")
 
         // Action handlers
-        case "action.setIcon":
-            handleActionSetIcon(body: body, extensionID: extensionID, sourceWebView: message.webView)
-        case "action.setBadgeText":
-            handleActionSetBadgeText(body: body, extensionID: extensionID, sourceWebView: message.webView)
-        case "action.setBadgeBackgroundColor":
-            handleActionSetBadgeBackgroundColor(body: body, extensionID: extensionID, sourceWebView: message.webView)
-        case "action.getBadgeText":
-            handleActionGetBadgeText(body: body, extensionID: extensionID, sourceWebView: message.webView)
-        case "action.setTitle":
-            handleActionSetTitle(body: body, extensionID: extensionID, sourceWebView: message.webView)
-        case "action.getTitle":
-            handleActionGetTitle(body: body, extensionID: extensionID, sourceWebView: message.webView)
-        case "action.setPopup":
-            handleActionSetPopup(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.actionSetIcon:
+            guard let ctx else { return }
+            handleActionSetIcon(ctx: ctx, body: body)
+        case MsgType.actionSetBadgeText:
+            guard let ctx else { return }
+            handleActionSetBadgeText(ctx: ctx, body: body)
+        case MsgType.actionSetBadgeBackgroundColor:
+            guard let ctx else { return }
+            handleActionSetBadgeBackgroundColor(ctx: ctx, body: body)
+        case MsgType.actionGetBadgeText:
+            guard let ctx else { return }
+            handleActionGetBadgeText(ctx: ctx, body: body)
+        case MsgType.actionSetTitle:
+            guard let ctx else { return }
+            handleActionSetTitle(ctx: ctx, body: body)
+        case MsgType.actionGetTitle:
+            guard let ctx else { return }
+            handleActionGetTitle(ctx: ctx, body: body)
+        case MsgType.actionSetPopup:
+            guard let ctx else { return }
+            handleActionSetPopup(ctx: ctx, body: body)
 
         // Commands handler
-        case "commands.getAll":
-            handleCommandsGetAll(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.commandsGetAll:
+            guard let ctx else { return }
+            handleCommandsGetAll(ctx: ctx, body: body)
 
         // Windows handlers
-        case "windows.getAll":
-            handleWindowsGetAll(body: body, extensionID: extensionID, sourceWebView: message.webView)
-        case "windows.get":
-            handleWindowsGet(body: body, extensionID: extensionID, sourceWebView: message.webView)
-        case "windows.getCurrent":
-            handleWindowsGetCurrent(body: body, extensionID: extensionID, sourceWebView: message.webView)
-        case "windows.create":
-            handleWindowsCreate(body: body, extensionID: extensionID, sourceWebView: message.webView)
-        case "windows.update":
-            handleWindowsUpdate(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.windowsGetAll:
+            guard let ctx else { return }
+            handleWindowsGetAll(ctx: ctx, body: body)
+        case MsgType.windowsGet:
+            guard let ctx else { return }
+            handleWindowsGet(ctx: ctx, body: body)
+        case MsgType.windowsGetCurrent:
+            guard let ctx else { return }
+            handleWindowsGetCurrent(ctx: ctx, body: body)
+        case MsgType.windowsCreate:
+            guard let ctx else { return }
+            handleWindowsCreate(ctx: ctx, body: body)
+        case MsgType.windowsUpdate:
+            guard let ctx else { return }
+            handleWindowsUpdate(ctx: ctx, body: body)
 
         // Font settings handler
-        case "fontSettings.getFontList":
-            handleFontSettingsGetFontList(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.fontSettingsGetFontList:
+            guard let ctx else { return }
+            handleFontSettingsGetFontList(ctx: ctx, body: body)
 
         // Permissions handler
-        case "permissions.contains":
-            handlePermissionsContains(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.permissionsContains:
+            guard let ctx else { return }
+            handlePermissionsContains(ctx: ctx, body: body)
 
         // Runtime: setUninstallURL
-        case "runtime.setUninstallURL":
-            handleRuntimeSetUninstallURL(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.runtimeSetUninstallURL:
+            guard let ctx else { return }
+            handleRuntimeSetUninstallURL(ctx: ctx, body: body)
 
         default:
             print("[ExtensionBridge] Unknown message type: \(type)")
@@ -189,30 +318,27 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
     // MARK: - Message Routing
 
-    private func handleSendMessage(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let message = body["message"],
-              let callbackID = body["callbackID"] as? String else { return }
+    private func handleSendMessage(ctx: MessageContext, body: [String: Any]) {
+        guard let message = body["message"] else { return }
 
-        guard let ext = ExtensionManager.shared.extension(withID: extensionID) else { return }
-
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+        guard let ext = ExtensionManager.shared.extension(withID: ctx.extensionID) else { return }
 
         // Serialize message to JSON for transport
         guard let messageData = try? JSONSerialization.data(withJSONObject: message),
               let messageJSON = String(data: messageData, encoding: .utf8) else { return }
 
         var sender: [String: Any] = [
-            "id": extensionID,
-            "origin": isContentScript ? "content-script" : "extension"
+            "id": ctx.extensionID,
+            "origin": ctx.isContentScript ? "content-script" : "extension"
         ]
         // Include sender URL — extensions like Dark Reader check sender.url to verify popup origin.
-        if let senderURL = sourceWebView?.url?.absoluteString {
+        if let senderURL = ctx.sourceWebView?.url?.absoluteString {
             sender["url"] = senderURL
         }
         // For content scripts, include sender.tab, sender.frameId, and sender.documentId.
         // Extensions like Dark Reader use sender.tab.id and sender.documentId to track
         // which documents have content scripts.
-        if isContentScript, let sourceWebView {
+        if ctx.isContentScript, let sourceWebView = ctx.sourceWebView {
             // Use the frameId from the payload (0 for top frame, non-zero for subframes).
             // This is critical: Chrome assigns unique frameIds per frame, and extensions
             // like Dark Reader use sender.frameId to track documents. Without unique IDs,
@@ -236,21 +362,21 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
         // Broadcast to all extension contexts (background, offscreen, popup) except the sender.
         // This matches Chrome's runtime.sendMessage semantics.
-        let js = "window.__extensionDispatchMessage(\(messageJSON), \(senderJSON), '\(callbackID)');"
+        let js = "window.__extensionDispatchMessage(\(messageJSON), \(senderJSON), '\(ctx.callbackID)');"
 
         var targetWebViews: [WKWebView] = []
-        if let bgWV = ExtensionManager.shared.backgroundHost(for: extensionID)?.webView {
+        if let bgWV = ExtensionManager.shared.backgroundHost(for: ctx.extensionID)?.webView {
             targetWebViews.append(bgWV)
         }
-        if let osWV = ExtensionManager.shared.offscreenHosts[extensionID]?.webView {
+        if let osWV = ExtensionManager.shared.offscreenHosts[ctx.extensionID]?.webView {
             targetWebViews.append(osWV)
         }
-        if let popupWV = ExtensionManager.shared.popupWebView(for: extensionID) {
+        if let popupWV = ExtensionManager.shared.popupWebView(for: ctx.extensionID) {
             targetWebViews.append(popupWV)
         }
 
         // Exclude the sender so it doesn't receive its own message
-        targetWebViews.removeAll { $0 === sourceWebView }
+        targetWebViews.removeAll { $0 === ctx.sourceWebView }
 
         // Intercept audio playback messages and handle natively.
         // WebKit's AudioContext doesn't work in hidden WKWebViews without user gesture,
@@ -259,15 +385,15 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             let action = msgDict["action"] as? String
             if action == "playAudio",
                let audioSrc = msgDict["audioSrc"] as? String,
-               let osHost = ExtensionManager.shared.offscreenHosts[extensionID] {
+               let osHost = ExtensionManager.shared.offscreenHosts[ctx.extensionID] {
                 osHost.playAudioNatively(base64: audioSrc)
-                deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+                deliverResponse(ctx, result: [:] as [String: Any])
                 return
             }
             if action == "pauseAudio",
-               let osHost = ExtensionManager.shared.offscreenHosts[extensionID] {
+               let osHost = ExtensionManager.shared.offscreenHosts[ctx.extensionID] {
                 osHost.stopAudioNatively()
-                deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+                deliverResponse(ctx, result: [:] as [String: Any])
                 return
             }
         }
@@ -282,22 +408,21 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
         // Store the source webView to route the response back.
         // Popup/background scripts run in .page world; content scripts run in the extension's content world.
-        let responseWorld: WKContentWorld = isContentScript ? ext.contentWorld : .page
-        pendingResponses[callbackID] = PendingResponse(
-            sourceWebView: sourceWebView,
+        let responseWorld: WKContentWorld = ctx.isContentScript ? ext.contentWorld : .page
+        pendingResponses[ctx.callbackID] = PendingResponse(
+            sourceWebView: ctx.sourceWebView,
             contentWorld: responseWorld
         )
     }
 
-    private func handleSendResponse(body: [String: Any], extensionID: String) {
-        guard let callbackID = body["callbackID"] as? String,
-              let pending = pendingResponses.removeValue(forKey: callbackID) else { return }
+    private func handleSendResponse(ctx: MessageContext, body: [String: Any]) {
+        guard let pending = pendingResponses.removeValue(forKey: ctx.callbackID) else { return }
 
         let response = body["response"] ?? [String: Any]()
         guard let responseData = try? JSONSerialization.data(withJSONObject: response),
               let responseJSON = String(data: responseData, encoding: .utf8) else { return }
 
-        let js = "window.__extensionDeliverResponse('\(callbackID)', \(responseJSON));"
+        let js = "window.__extensionDeliverResponse('\(ctx.callbackID)', \(responseJSON));"
 
         if let webView = pending.sourceWebView {
             webView.evaluateJavaScript(js, in: nil, in: pending.contentWorld) { _ in }
@@ -306,23 +431,21 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
     // MARK: - Storage Handlers
 
-    private func handleStorageGet(body: [String: Any], extensionID: String, sourceWebView: WKWebView?, keyPrefix: String, areaName: String) {
-        guard let params = body["params"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleStorageGet(ctx: MessageContext, body: [String: Any], keyPrefix: String, areaName: String) {
+        guard let params = body["params"] as? [String: Any] else { return }
 
         let getAll = params["getAll"] as? Bool ?? false
         let result: [String: Any]
         if keyPrefix.isEmpty {
             if getAll {
-                result = AppDatabase.shared.storageGetAll(extensionID: extensionID)
+                result = AppDatabase.shared.storageGetAll(extensionID: ctx.extensionID)
             } else {
                 let keys = params["keys"] as? [String] ?? []
-                result = AppDatabase.shared.storageGet(extensionID: extensionID, keys: keys)
+                result = AppDatabase.shared.storageGet(extensionID: ctx.extensionID, keys: keys)
             }
         } else {
             if getAll {
-                let allItems = AppDatabase.shared.storageGetAll(extensionID: extensionID)
+                let allItems = AppDatabase.shared.storageGetAll(extensionID: ctx.extensionID)
                 var filtered: [String: Any] = [:]
                 for (key, value) in allItems where key.hasPrefix(keyPrefix) {
                     filtered[String(key.dropFirst(keyPrefix.count))] = value
@@ -331,7 +454,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             } else {
                 let keys = params["keys"] as? [String] ?? []
                 let prefixedKeys = keys.map { keyPrefix + $0 }
-                let rawResult = AppDatabase.shared.storageGet(extensionID: extensionID, keys: prefixedKeys)
+                let rawResult = AppDatabase.shared.storageGet(extensionID: ctx.extensionID, keys: prefixedKeys)
                 var filtered: [String: Any] = [:]
                 for (key, value) in rawResult where key.hasPrefix(keyPrefix) {
                     filtered[String(key.dropFirst(keyPrefix.count))] = value
@@ -340,24 +463,22 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             }
         }
 
-        deliverCallbackResponse(callbackID: callbackID, result: result, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: result)
     }
 
-    private func handleStorageSet(body: [String: Any], extensionID: String, sourceWebView: WKWebView?, keyPrefix: String, areaName: String) {
+    private func handleStorageSet(ctx: MessageContext, body: [String: Any], keyPrefix: String, areaName: String) {
         guard let params = body["params"] as? [String: Any],
-              let items = params["items"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+              let items = params["items"] as? [String: Any] else { return }
 
         // Read old values before writing to compute changes
         let prefixedKeys = items.keys.map { keyPrefix + $0 }
-        let oldPrefixed = AppDatabase.shared.storageGet(extensionID: extensionID, keys: prefixedKeys)
+        let oldPrefixed = AppDatabase.shared.storageGet(extensionID: ctx.extensionID, keys: prefixedKeys)
 
         // Write with prefix
         var prefixedItems: [String: Any] = [:]
         for (key, value) in items { prefixedItems[keyPrefix + key] = value }
-        AppDatabase.shared.storageSet(extensionID: extensionID, items: prefixedItems)
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        AppDatabase.shared.storageSet(extensionID: ctx.extensionID, items: prefixedItems)
+        deliverResponse(ctx, result: [:] as [String: Any])
 
         // Broadcast storage.onChanged with unprefixed keys
         var changes: [String: Any] = [:]
@@ -366,21 +487,19 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             if let old = oldPrefixed[keyPrefix + key] { change["oldValue"] = old }
             changes[key] = change
         }
-        broadcastStorageChanged(changes: changes, areaName: areaName, extensionID: extensionID, sourceWebView: sourceWebView, isContentScript: isContentScript)
+        broadcastStorageChanged(changes: changes, areaName: areaName, extensionID: ctx.extensionID, sourceWebView: ctx.sourceWebView, isContentScript: ctx.isContentScript)
     }
 
-    private func handleStorageRemove(body: [String: Any], extensionID: String, sourceWebView: WKWebView?, keyPrefix: String, areaName: String) {
+    private func handleStorageRemove(ctx: MessageContext, body: [String: Any], keyPrefix: String, areaName: String) {
         guard let params = body["params"] as? [String: Any],
-              let keys = params["keys"] as? [String],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+              let keys = params["keys"] as? [String] else { return }
 
         // Read old values before removing
         let prefixedKeys = keys.map { keyPrefix + $0 }
-        let oldPrefixed = AppDatabase.shared.storageGet(extensionID: extensionID, keys: prefixedKeys)
+        let oldPrefixed = AppDatabase.shared.storageGet(extensionID: ctx.extensionID, keys: prefixedKeys)
 
-        AppDatabase.shared.storageRemove(extensionID: extensionID, keys: prefixedKeys)
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        AppDatabase.shared.storageRemove(extensionID: ctx.extensionID, keys: prefixedKeys)
+        deliverResponse(ctx, result: [:] as [String: Any])
 
         // Broadcast storage.onChanged with unprefixed keys
         var changes: [String: Any] = [:]
@@ -390,24 +509,21 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             }
         }
         if !changes.isEmpty {
-            broadcastStorageChanged(changes: changes, areaName: areaName, extensionID: extensionID, sourceWebView: sourceWebView, isContentScript: isContentScript)
+            broadcastStorageChanged(changes: changes, areaName: areaName, extensionID: ctx.extensionID, sourceWebView: ctx.sourceWebView, isContentScript: ctx.isContentScript)
         }
     }
 
-    private func handleStorageClear(body: [String: Any], extensionID: String, sourceWebView: WKWebView?, keyPrefix: String, areaName: String) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
-
+    private func handleStorageClear(ctx: MessageContext, body: [String: Any], keyPrefix: String, areaName: String) {
         // Read all values before clearing
-        let allValues = AppDatabase.shared.storageGetAll(extensionID: extensionID)
+        let allValues = AppDatabase.shared.storageGetAll(extensionID: ctx.extensionID)
 
         if keyPrefix.isEmpty {
-            AppDatabase.shared.storageClear(extensionID: extensionID)
+            AppDatabase.shared.storageClear(extensionID: ctx.extensionID)
         } else {
             let keysToRemove = allValues.keys.filter { $0.hasPrefix(keyPrefix) }
-            AppDatabase.shared.storageRemove(extensionID: extensionID, keys: Array(keysToRemove))
+            AppDatabase.shared.storageRemove(extensionID: ctx.extensionID, keys: Array(keysToRemove))
         }
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: [:] as [String: Any])
 
         // Broadcast storage.onChanged with unprefixed keys
         var changes: [String: Any] = [:]
@@ -416,7 +532,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             changes[unprefixedKey] = ["oldValue": oldValue]
         }
         if !changes.isEmpty {
-            broadcastStorageChanged(changes: changes, areaName: areaName, extensionID: extensionID, sourceWebView: sourceWebView, isContentScript: isContentScript)
+            broadcastStorageChanged(changes: changes, areaName: areaName, extensionID: ctx.extensionID, sourceWebView: ctx.sourceWebView, isContentScript: ctx.isContentScript)
         }
     }
 
@@ -425,6 +541,24 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
               let resultJSON = String(data: resultData, encoding: .utf8) else { return }
         deliverJS("window.__extensionDeliverResponse('\(callbackID)', \(resultJSON));",
                   extensionID: extensionID, webView: webView, isContentScript: isContentScript)
+    }
+
+    // MARK: - MessageContext Delivery
+
+    private func deliverResponse(_ ctx: MessageContext, result: [String: Any]) {
+        deliverCallbackResponse(callbackID: ctx.callbackID, result: result, extensionID: ctx.extensionID, webView: ctx.sourceWebView, isContentScript: ctx.isContentScript)
+    }
+
+    private func deliverResponse(_ ctx: MessageContext, result: String) {
+        deliverCallbackResponse(callbackID: ctx.callbackID, result: result, extensionID: ctx.extensionID, webView: ctx.sourceWebView, isContentScript: ctx.isContentScript)
+    }
+
+    private func deliverResponse(_ ctx: MessageContext, result: Bool) {
+        deliverCallbackResponse(callbackID: ctx.callbackID, result: result, extensionID: ctx.extensionID, webView: ctx.sourceWebView, isContentScript: ctx.isContentScript)
+    }
+
+    private func deliverResponse(_ ctx: MessageContext, result: [[String: Any]]) {
+        deliverCallbackResponse(callbackID: ctx.callbackID, result: result, extensionID: ctx.extensionID, webView: ctx.sourceWebView, isContentScript: ctx.isContentScript)
     }
 
     // MARK: - Pending Response Tracking
@@ -477,10 +611,8 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
     // MARK: - Tabs Handlers
 
-    private func handleTabsQuery(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let params = body["params"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleTabsQuery(ctx: MessageContext, body: [String: Any]) {
+        guard let params = body["params"] as? [String: Any] else { return }
         let queryInfo = params["queryInfo"] as? [String: Any] ?? [:]
 
         let filterActive = queryInfo["active"] as? Bool
@@ -491,7 +623,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         let filterWindowId = queryInfo["windowId"] as? Int
 
         let mgr = ExtensionManager.shared
-        let ext = mgr.extension(withID: extensionID)
+        let ext = mgr.extension(withID: ctx.extensionID)
         let includeURLFields = ext.map { ExtensionPermissionChecker.hasPermission("tabs", extension: $0) } ?? true
         var results: [[String: Any]] = []
 
@@ -540,18 +672,15 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             }
         }
 
-        deliverCallbackResponse(callbackID: callbackID, result: results, extensionID: extensionID,
-                                webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: results)
     }
 
-    private func handleTabsCreate(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let params = body["params"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleTabsCreate(ctx: MessageContext, body: [String: Any]) {
+        guard let params = body["params"] as? [String: Any] else { return }
         let props = params["createProperties"] as? [String: Any] ?? [:]
 
         let mgr = ExtensionManager.shared
-        let ext = mgr.extension(withID: extensionID)
+        let ext = mgr.extension(withID: ctx.extensionID)
         let includeURLFields = ext.map { ExtensionPermissionChecker.hasPermission("tabs", extension: $0) } ?? true
         let urlString = props["url"] as? String
         let url = urlString.flatMap { URL(string: $0) }
@@ -568,8 +697,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         } else if let s = TabStore.shared.spaces.first {
             space = s
         } else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "No space available"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "No space available"])
             return
         }
 
@@ -585,18 +713,15 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         }
 
         let info = buildTabInfo(tab: tab, space: space, isActive: active, includeURLFields: includeURLFields, extension: ext)
-        deliverCallbackResponse(callbackID: callbackID, result: info, extensionID: extensionID,
-                                webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: info)
     }
 
-    private func handleTabsUpdate(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let params = body["params"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleTabsUpdate(ctx: MessageContext, body: [String: Any]) {
+        guard let params = body["params"] as? [String: Any] else { return }
         let updateProps = params["updateProperties"] as? [String: Any] ?? [:]
 
         let mgr = ExtensionManager.shared
-        let ext = mgr.extension(withID: extensionID)
+        let ext = mgr.extension(withID: ctx.extensionID)
         let includeURLFields = ext.map { ExtensionPermissionChecker.hasPermission("tabs", extension: $0) } ?? true
 
         // Resolve tab
@@ -613,8 +738,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         }
 
         guard let tab = targetTab, let space = targetSpace else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Tab not found"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "Tab not found"])
             return
         }
 
@@ -637,15 +761,12 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
         let isActive = space.selectedTabID == tab.id
         let info = buildTabInfo(tab: tab, space: space, isActive: isActive, includeURLFields: includeURLFields, extension: ext)
-        deliverCallbackResponse(callbackID: callbackID, result: info, extensionID: extensionID,
-                                webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: info)
     }
 
-    private func handleTabsRemove(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
+    private func handleTabsRemove(ctx: MessageContext, body: [String: Any]) {
         guard let params = body["params"] as? [String: Any],
-              let tabIds = params["tabIds"] as? [Int],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+              let tabIds = params["tabIds"] as? [Int] else { return }
 
         let mgr = ExtensionManager.shared
 
@@ -657,72 +778,60 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             }
         }
 
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID,
-                                webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: [:] as [String: Any])
     }
 
-    private func handleTabsGet(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
+    private func handleTabsGet(ctx: MessageContext, body: [String: Any]) {
         guard let params = body["params"] as? [String: Any],
-              let tabIDInt = params["tabId"] as? Int,
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+              let tabIDInt = params["tabId"] as? Int else { return }
 
         let mgr = ExtensionManager.shared
-        let ext = mgr.extension(withID: extensionID)
+        let ext = mgr.extension(withID: ctx.extensionID)
         let includeURLFields = ext.map { ExtensionPermissionChecker.hasPermission("tabs", extension: $0) } ?? true
         guard let uuid = mgr.tabIDMap.uuid(for: tabIDInt) else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Tab not found"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "Tab not found"])
             return
         }
 
         let (tab, space) = findTab(uuid: uuid)
         guard let tab, let space else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Tab not found"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "Tab not found"])
             return
         }
 
         let isActive = space.selectedTabID == tab.id
         let info = buildTabInfo(tab: tab, space: space, isActive: isActive, includeURLFields: includeURLFields, extension: ext)
-        deliverCallbackResponse(callbackID: callbackID, result: info, extensionID: extensionID,
-                                webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: info)
     }
 
-    private func handleTabsSendMessage(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
+    private func handleTabsSendMessage(ctx: MessageContext, body: [String: Any]) {
         guard let params = body["params"] as? [String: Any],
               let tabIDInt = params["tabId"] as? Int,
-              let message = params["message"],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+              let message = params["message"] else { return }
 
         let mgr = ExtensionManager.shared
-        guard let ext = mgr.extension(withID: extensionID),
+        guard let ext = mgr.extension(withID: ctx.extensionID),
               let uuid = mgr.tabIDMap.uuid(for: tabIDInt) else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Tab not found"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "Tab not found"])
             return
         }
 
         let (tab, _) = findTab(uuid: uuid)
         guard let tab, let webView = tab.webView else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Tab has no webView"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "Tab has no webView"])
             return
         }
 
         // Host permission check
         if let tabURL = tab.url, !ExtensionPermissionChecker.hasHostPermission(for: tabURL, extension: ext) {
-            deliverCallbackResponse(callbackID: callbackID,
-                result: ["__error": ExtensionPermissionChecker.hostPermissionError(url: tabURL)],
-                extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": ExtensionPermissionChecker.hostPermissionError(url: tabURL)])
             return
         }
 
         guard let messageData = try? JSONSerialization.data(withJSONObject: message),
               let messageJSON = String(data: messageData, encoding: .utf8) else { return }
 
-        let sender: [String: Any] = ["id": extensionID, "origin": "background"]
+        let sender: [String: Any] = ["id": ctx.extensionID, "origin": "background"]
         guard let senderData = try? JSONSerialization.data(withJSONObject: sender),
               let senderJSON = String(data: senderData, encoding: .utf8) else { return }
 
@@ -731,10 +840,10 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
         // Helper to deliver the message and store the pending response
         let deliverMessage = { [weak self] in
-            let js = "window.__extensionDispatchMessage(\(messageJSON), \(senderJSON), '\(callbackID)');"
+            let js = "window.__extensionDispatchMessage(\(messageJSON), \(senderJSON), '\(ctx.callbackID)');"
             webView.evaluateJavaScript(js, in: nil, in: ext.contentWorld) { _ in }
-            self?.pendingResponses[callbackID] = PendingResponse(
-                sourceWebView: sourceWebView,
+            self?.pendingResponses[ctx.callbackID] = PendingResponse(
+                sourceWebView: ctx.sourceWebView,
                 contentWorld: .page  // Response goes back to background (page world)
             )
         }
@@ -747,9 +856,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             // Fast path: check cached documentId (populated by runtime.sendMessage from content scripts)
             if let cachedDocId = cachedDocumentIds[ObjectIdentifier(webView)] {
                 if cachedDocId != targetDocumentId {
-                    deliverCallbackResponse(callbackID: callbackID,
-                        result: ["__error": "Could not establish connection. Receiving end does not exist."],
-                        extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+                    deliverResponse(ctx, result: ["__error": "Could not establish connection. Receiving end does not exist."])
                     return
                 }
             } else {
@@ -761,14 +868,10 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
                         if currentDocId == targetDocumentId {
                             deliverMessage()
                         } else {
-                            self?.deliverCallbackResponse(callbackID: callbackID,
-                                result: ["__error": "Could not establish connection. Receiving end does not exist."],
-                                extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+                            self?.deliverResponse(ctx, result: ["__error": "Could not establish connection. Receiving end does not exist."])
                         }
                     } else {
-                        self?.deliverCallbackResponse(callbackID: callbackID,
-                            result: ["__error": "Could not establish connection. Receiving end does not exist."],
-                            extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+                        self?.deliverResponse(ctx, result: ["__error": "Could not establish connection. Receiving end does not exist."])
                     }
                 }
                 return
@@ -781,36 +884,30 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
     // MARK: - Scripting Handlers
 
-    private func handleScriptingExecuteScript(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
+    private func handleScriptingExecuteScript(ctx: MessageContext, body: [String: Any]) {
         guard let params = body["params"] as? [String: Any],
-              let injection = params["injection"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+              let injection = params["injection"] as? [String: Any] else { return }
 
         let mgr = ExtensionManager.shared
-        guard let ext = mgr.extension(withID: extensionID) else { return }
+        guard let ext = mgr.extension(withID: ctx.extensionID) else { return }
 
         let target = injection["target"] as? [String: Any]
         let tabIDInt = target?["tabId"] as? Int
 
         guard let tabIDInt, let uuid = mgr.tabIDMap.uuid(for: tabIDInt) else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Target tab required"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "Target tab required"])
             return
         }
 
         let (tab, _) = findTab(uuid: uuid)
         guard let tab, let webView = tab.webView else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Tab has no webView"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "Tab has no webView"])
             return
         }
 
         // Host permission check for programmatic script injection
         if let tabURL = tab.url, !ExtensionPermissionChecker.hasHostPermission(for: tabURL, extension: ext) {
-            deliverCallbackResponse(callbackID: callbackID,
-                result: ["__error": ExtensionPermissionChecker.hostPermissionError(url: tabURL)],
-                extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": ExtensionPermissionChecker.hostPermissionError(url: tabURL)])
             return
         }
 
@@ -834,8 +931,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         }
 
         guard !jsToExecute.isEmpty else {
-            deliverCallbackResponse(callbackID: callbackID, result: [],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: [] as [[String: Any]])
             return
         }
 
@@ -844,45 +940,37 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             switch result {
             case .success(let value):
                 let resultItem: [String: Any] = ["result": value ?? NSNull()]
-                self.deliverCallbackResponse(callbackID: callbackID, result: [resultItem],
-                                             extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+                self.deliverResponse(ctx, result: [resultItem])
             case .failure(let error):
-                self.deliverCallbackResponse(callbackID: callbackID, result: ["__error": error.localizedDescription],
-                                             extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+                self.deliverResponse(ctx, result: ["__error": error.localizedDescription])
             }
         }
     }
 
-    private func handleScriptingInsertCSS(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
+    private func handleScriptingInsertCSS(ctx: MessageContext, body: [String: Any]) {
         guard let params = body["params"] as? [String: Any],
-              let injection = params["injection"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+              let injection = params["injection"] as? [String: Any] else { return }
 
         let mgr = ExtensionManager.shared
-        guard let ext = mgr.extension(withID: extensionID) else { return }
+        guard let ext = mgr.extension(withID: ctx.extensionID) else { return }
 
         let target = injection["target"] as? [String: Any]
         let tabIDInt = target?["tabId"] as? Int
 
         guard let tabIDInt, let uuid = mgr.tabIDMap.uuid(for: tabIDInt) else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Target tab required"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "Target tab required"])
             return
         }
 
         let (tab, _) = findTab(uuid: uuid)
         guard let tab, let webView = tab.webView else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Tab has no webView"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "Tab has no webView"])
             return
         }
 
         // Host permission check for programmatic CSS injection
         if let tabURL = tab.url, !ExtensionPermissionChecker.hasHostPermission(for: tabURL, extension: ext) {
-            deliverCallbackResponse(callbackID: callbackID,
-                result: ["__error": ExtensionPermissionChecker.hostPermissionError(url: tabURL)],
-                extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": ExtensionPermissionChecker.hostPermissionError(url: tabURL)])
             return
         }
 
@@ -899,10 +987,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             }
         }
 
-        let escapedCSS = cssContent
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
+        let escapedCSS = cssContent.jsEscapedForSingleQuotes
 
         let js = """
         (function() {
@@ -913,17 +998,14 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         """
 
         webView.evaluateJavaScript(js, in: nil, in: ext.contentWorld) { [weak self] _ in
-            self?.deliverCallbackResponse(callbackID: callbackID, result: [:],
-                                          extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            self?.deliverResponse(ctx, result: [:] as [String: Any])
         }
     }
 
     // MARK: - Tabs: detectLanguage
 
-    private func handleTabsDetectLanguage(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let params = body["params"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleTabsDetectLanguage(ctx: MessageContext, body: [String: Any]) {
+        let params = body["params"] as? [String: Any] ?? [:]
 
         let mgr = ExtensionManager.shared
         let tabIDInt = params["tabId"] as? Int
@@ -938,25 +1020,21 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         }
 
         guard let tab = targetTab, let webView = tab.webView else {
-            deliverCallbackResponse(callbackID: callbackID, result: "und",
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: "und")
             return
         }
 
         webView.evaluateJavaScript("document.documentElement.lang || ''") { [weak self] result, _ in
             let lang = (result as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "und"
-            self?.deliverCallbackResponse(callbackID: callbackID, result: lang,
-                                          extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            self?.deliverResponse(ctx, result: lang)
         }
     }
 
     // MARK: - Context Menus Handlers
 
-    private func handleContextMenusCreate(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
+    private func handleContextMenusCreate(ctx: MessageContext, body: [String: Any]) {
         guard let params = body["params"] as? [String: Any],
-              let properties = params["properties"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+              let properties = params["properties"] as? [String: Any] else { return }
 
         let item = ContextMenuItem(
             id: properties["id"] as? String ?? UUID().uuidString,
@@ -964,84 +1042,67 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             contexts: properties["contexts"] as? [String] ?? ["page"],
             parentId: properties["parentId"] as? String,
             type: properties["type"] as? String ?? "normal",
-            extensionID: extensionID
+            extensionID: ctx.extensionID
         )
 
-        ExtensionManager.shared.addContextMenuItem(item, for: extensionID)
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        ExtensionManager.shared.addContextMenuItem(item, for: ctx.extensionID)
+        deliverResponse(ctx, result: [:] as [String: Any])
     }
 
-    private func handleContextMenusUpdate(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
+    private func handleContextMenusUpdate(ctx: MessageContext, body: [String: Any]) {
         guard let params = body["params"] as? [String: Any],
               let menuItemId = params["menuItemId"] as? String,
-              let properties = params["properties"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+              let properties = params["properties"] as? [String: Any] else { return }
 
-        ExtensionManager.shared.updateContextMenuItem(id: menuItemId, properties: properties, for: extensionID)
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        ExtensionManager.shared.updateContextMenuItem(id: menuItemId, properties: properties, for: ctx.extensionID)
+        deliverResponse(ctx, result: [:] as [String: Any])
     }
 
-    private func handleContextMenusRemove(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let params = body["params"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleContextMenusRemove(ctx: MessageContext, body: [String: Any]) {
+        let params = body["params"] as? [String: Any] ?? [:]
 
         if let menuItemId = params["menuItemId"] as? String {
-            ExtensionManager.shared.removeContextMenuItem(id: menuItemId, for: extensionID)
+            ExtensionManager.shared.removeContextMenuItem(id: menuItemId, for: ctx.extensionID)
         }
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: [:] as [String: Any])
     }
 
-    private func handleContextMenusRemoveAll(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
-
-        ExtensionManager.shared.removeAllContextMenuItems(for: extensionID)
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+    private func handleContextMenusRemoveAll(ctx: MessageContext, body: [String: Any]) {
+        ExtensionManager.shared.removeAllContextMenuItems(for: ctx.extensionID)
+        deliverResponse(ctx, result: [:] as [String: Any])
     }
 
     // MARK: - Offscreen Document Handlers
 
-    private func handleOffscreenCreateDocument(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
+    private func handleOffscreenCreateDocument(ctx: MessageContext, body: [String: Any]) {
         guard let params = body["params"] as? [String: Any],
-              let url = params["url"] as? String,
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+              let url = params["url"] as? String else { return }
 
-        guard let ext = ExtensionManager.shared.extension(withID: extensionID) else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Extension not found"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        guard let ext = ExtensionManager.shared.extension(withID: ctx.extensionID) else {
+            deliverResponse(ctx, result: ["__error": "Extension not found"])
             return
         }
 
         let host = OffscreenDocumentHost(extension: ext)
-        ExtensionManager.shared.offscreenHosts[extensionID] = host
+        ExtensionManager.shared.offscreenHosts[ctx.extensionID] = host
 
         // Delay the callback until the offscreen document finishes loading,
         // so the caller's next sendMessage finds the onMessage listener registered.
         host.load(url: url) { [weak self] in
-            self?.deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            self?.deliverResponse(ctx, result: [:] as [String: Any])
         }
     }
 
-    private func handleOffscreenCloseDocument(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleOffscreenCloseDocument(ctx: MessageContext, body: [String: Any]) {
+        ExtensionManager.shared.offscreenHosts[ctx.extensionID]?.stop()
+        ExtensionManager.shared.offscreenHosts.removeValue(forKey: ctx.extensionID)
 
-        ExtensionManager.shared.offscreenHosts[extensionID]?.stop()
-        ExtensionManager.shared.offscreenHosts.removeValue(forKey: extensionID)
-
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: [:] as [String: Any])
     }
 
-    private func handleOffscreenHasDocument(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
-
-        let hasDoc = ExtensionManager.shared.offscreenHosts[extensionID] != nil
-        deliverCallbackResponse(callbackID: callbackID, result: hasDoc,
-                                extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+    private func handleOffscreenHasDocument(ctx: MessageContext, body: [String: Any]) {
+        let hasDoc = ExtensionManager.shared.offscreenHosts[ctx.extensionID] != nil
+        deliverResponse(ctx, result: hasDoc)
     }
 
     // MARK: - Port (runtime.connect) Handlers
@@ -1060,6 +1121,33 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         let orphaned = openPorts.filter { $0.value.sourceWebView == nil && $0.value.targetWebView == nil }
         for portID in orphaned.keys {
             openPorts.removeValue(forKey: portID)
+        }
+        cleanupOrphanedResponses()
+        cleanupStaleCachedDocumentIds()
+    }
+
+    private func cleanupOrphanedResponses() {
+        let orphaned = pendingResponses.filter { $0.value.sourceWebView == nil }
+        for key in orphaned.keys {
+            pendingResponses.removeValue(forKey: key)
+        }
+    }
+
+    private func cleanupStaleCachedDocumentIds() {
+        let liveWebViewIDs: Set<ObjectIdentifier> = {
+            var ids = Set<ObjectIdentifier>()
+            for space in TabStore.shared.spaces {
+                for tab in space.tabs {
+                    if let wv = tab.webView { ids.insert(ObjectIdentifier(wv)) }
+                }
+                for entry in space.pinnedEntries {
+                    if let wv = entry.tab?.webView { ids.insert(ObjectIdentifier(wv)) }
+                }
+            }
+            return ids
+        }()
+        for key in cachedDocumentIds.keys where !liveWebViewIDs.contains(key) {
+            cachedDocumentIds.removeValue(forKey: key)
         }
     }
 
@@ -1084,7 +1172,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         )
 
         // Notify the background script's onConnect listeners
-        let escapedName = name.replacingOccurrences(of: "'", with: "\\'")
+        let escapedName = name.jsEscapedForSingleQuotes
         let js = "if (window.__extensionDispatchConnect) { window.__extensionDispatchConnect('\(portID)', '\(escapedName)'); }"
         backgroundHost.evaluateJavaScript(js)
     }
@@ -1138,7 +1226,8 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         guard let changesData = try? JSONSerialization.data(withJSONObject: changes),
               let changesJSON = String(data: changesData, encoding: .utf8) else { return }
 
-        let js = "if (window.__extensionDispatchStorageChanged) { window.__extensionDispatchStorageChanged(\(changesJSON), '\(areaName)'); }"
+        let escapedArea = areaName.jsEscapedForSingleQuotes
+        let js = "if (window.__extensionDispatchStorageChanged) { window.__extensionDispatchStorageChanged(\(changesJSON), '\(escapedArea)'); }"
 
         // Dispatch to the extension's background host
         let bgWebView = ExtensionManager.shared.backgroundHost(for: extensionID)?.webView
@@ -1156,18 +1245,25 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         // Dispatch to all tabs with the extension's content scripts
         guard let ext = ExtensionManager.shared.extension(withID: extensionID) else { return }
         for space in TabStore.shared.spaces {
+            // Chrome's storage.local doesn't cross the incognito boundary
+            if space.isIncognito { continue }
+
             for tab in space.tabs {
                 if tab.webView !== sourceWebView {
                     tab.webView?.evaluateJavaScript(js, in: nil, in: ext.contentWorld) { _ in }
+                }
+            }
+            // Also broadcast to live pinned tabs
+            for entry in space.pinnedEntries {
+                if let wv = entry.tab?.webView, wv !== sourceWebView {
+                    wv.evaluateJavaScript(js, in: nil, in: ext.contentWorld) { _ in }
                 }
             }
         }
     }
 
     private func deliverCallbackResponse(callbackID: String, result: String, extensionID: String, webView: WKWebView?, isContentScript: Bool) {
-        let escaped = result.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
+        let escaped = result.jsEscapedForSingleQuotes
         deliverJS("window.__extensionDeliverResponse('\(callbackID)', '\(escaped)');",
                   extensionID: extensionID, webView: webView, isContentScript: isContentScript)
     }
@@ -1207,15 +1303,13 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
     // MARK: - Runtime: openOptionsPage
 
-    private func handleRuntimeOpenOptionsPage(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        let callbackID = body["callbackID"] as? String
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleRuntimeOpenOptionsPage(ctx: MessageContext?, body: [String: Any]) {
+        let extensionID = ctx?.extensionID ?? (body["extensionID"] as? String ?? "")
 
         guard let ext = ExtensionManager.shared.extension(withID: extensionID),
               ext.optionsURL != nil else {
-            if let cbID = callbackID {
-                deliverCallbackResponse(callbackID: cbID, result: ["__error": "No options page defined"],
-                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            if let ctx {
+                deliverResponse(ctx, result: ["__error": "No options page defined"])
             }
             return
         }
@@ -1226,24 +1320,21 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             userInfo: ["extensionID": extensionID]
         )
 
-        if let cbID = callbackID {
-            deliverCallbackResponse(callbackID: cbID, result: [:],
-                extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        if let ctx {
+            deliverResponse(ctx, result: [:] as [String: Any])
         }
     }
 
     // MARK: - Resource: get (content script resource loading)
 
-    private func handleResourceGet(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        let callbackID = body["callbackID"] as? String
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleResourceGet(ctx: MessageContext?, body: [String: Any]) {
+        let extensionID = ctx?.extensionID ?? (body["extensionID"] as? String ?? "")
         let path = body["path"] as? String ?? ""
 
         guard let ext = ExtensionManager.shared.extension(withID: extensionID),
               !path.isEmpty else {
-            if let cbID = callbackID {
-                deliverCallbackResponse(callbackID: cbID, result: ["__error": "Not found"],
-                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            if let ctx {
+                deliverResponse(ctx, result: ["__error": "Not found"])
             }
             return
         }
@@ -1255,17 +1346,15 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         let basePath = ext.basePath.standardizedFileURL.path
         guard resolvedPath.hasPrefix(basePath),
               let data = try? String(contentsOf: fileURL, encoding: .utf8) else {
-            if let cbID = callbackID {
-                deliverCallbackResponse(callbackID: cbID, result: ["__error": "Not found"],
-                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            if let ctx {
+                deliverResponse(ctx, result: ["__error": "Not found"])
             }
             return
         }
 
         let mimeType = ExtensionPageSchemeHandler.mimeType(for: fileURL)
-        if let cbID = callbackID {
-            deliverCallbackResponse(callbackID: cbID, result: ["data": data, "mimeType": mimeType],
-                extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        if let ctx {
+            deliverResponse(ctx, result: ["data": data, "mimeType": mimeType])
         }
     }
 
@@ -1278,122 +1367,102 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
     // MARK: - Action Handlers
 
-    private func handleActionSetIcon(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleActionSetIcon(ctx: MessageContext, body: [String: Any]) {
         let params = body["params"] as? [String: Any] ?? [:]
 
         // Store custom icon if path provided
         if let path = params["path"] as? String,
-           let ext = ExtensionManager.shared.extension(withID: extensionID) {
+           let ext = ExtensionManager.shared.extension(withID: ctx.extensionID) {
             let iconURL = ext.basePath.appendingPathComponent(path)
             if let image = NSImage(contentsOf: iconURL) {
-                ExtensionManager.shared.customIcons[extensionID] = image
+                ExtensionManager.shared.customIcons[ctx.extensionID] = image
             }
         } else if let iconDict = params["path"] as? [String: String],
-                  let ext = ExtensionManager.shared.extension(withID: extensionID) {
+                  let ext = ExtensionManager.shared.extension(withID: ctx.extensionID) {
             // Sized icon dict — pick best
             let bestPath = iconDict["32"] ?? iconDict["48"] ?? iconDict["16"] ?? iconDict.values.first
             if let bp = bestPath {
                 let iconURL = ext.basePath.appendingPathComponent(bp)
                 if let image = NSImage(contentsOf: iconURL) {
-                    ExtensionManager.shared.customIcons[extensionID] = image
+                    ExtensionManager.shared.customIcons[ctx.extensionID] = image
                 }
             }
         }
 
         NotificationCenter.default.post(name: ExtensionManager.extensionActionDidChangeNotification, object: nil,
-                                        userInfo: ["extensionID": extensionID])
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+                                        userInfo: ["extensionID": ctx.extensionID])
+        deliverResponse(ctx, result: [:] as [String: Any])
     }
 
-    private func handleActionSetBadgeText(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleActionSetBadgeText(ctx: MessageContext, body: [String: Any]) {
         let params = body["params"] as? [String: Any] ?? [:]
 
         let text = params["text"] as? String ?? ""
-        let oldText = ExtensionManager.shared.badgeText[extensionID] ?? ""
-        ExtensionManager.shared.badgeText[extensionID] = text
+        let oldText = ExtensionManager.shared.badgeText[ctx.extensionID] ?? ""
+        ExtensionManager.shared.badgeText[ctx.extensionID] = text
         if text != oldText {
             NotificationCenter.default.post(name: ExtensionManager.extensionActionDidChangeNotification, object: nil,
-                                            userInfo: ["extensionID": extensionID])
+                                            userInfo: ["extensionID": ctx.extensionID])
         }
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: [:] as [String: Any])
     }
 
-    private func handleActionSetBadgeBackgroundColor(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleActionSetBadgeBackgroundColor(ctx: MessageContext, body: [String: Any]) {
         let params = body["params"] as? [String: Any] ?? [:]
 
-        let oldColor = ExtensionManager.shared.badgeBackgroundColor[extensionID]
+        let oldColor = ExtensionManager.shared.badgeBackgroundColor[ctx.extensionID]
         if let colorArray = params["color"] as? [Int], colorArray.count >= 3 {
             let r = CGFloat(colorArray[0]) / 255.0
             let g = CGFloat(colorArray[1]) / 255.0
             let b = CGFloat(colorArray[2]) / 255.0
             let a = colorArray.count >= 4 ? CGFloat(colorArray[3]) / 255.0 : 1.0
-            ExtensionManager.shared.badgeBackgroundColor[extensionID] = NSColor(red: r, green: g, blue: b, alpha: a)
+            ExtensionManager.shared.badgeBackgroundColor[ctx.extensionID] = NSColor(red: r, green: g, blue: b, alpha: a)
         } else if let colorString = params["color"] as? String {
-            ExtensionManager.shared.badgeBackgroundColor[extensionID] = NSColor(hex: colorString)
+            ExtensionManager.shared.badgeBackgroundColor[ctx.extensionID] = NSColor(hex: colorString)
         }
 
-        let newColor = ExtensionManager.shared.badgeBackgroundColor[extensionID]
+        let newColor = ExtensionManager.shared.badgeBackgroundColor[ctx.extensionID]
         if oldColor != newColor {
             NotificationCenter.default.post(name: ExtensionManager.extensionActionDidChangeNotification, object: nil,
-                                            userInfo: ["extensionID": extensionID])
+                                            userInfo: ["extensionID": ctx.extensionID])
         }
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: [:] as [String: Any])
     }
 
-    private func handleActionGetBadgeText(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
-
-        let text = ExtensionManager.shared.badgeText[extensionID] ?? ""
-        deliverCallbackResponse(callbackID: callbackID, result: text, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+    private func handleActionGetBadgeText(ctx: MessageContext, body: [String: Any]) {
+        let text = ExtensionManager.shared.badgeText[ctx.extensionID] ?? ""
+        deliverResponse(ctx, result: text)
     }
 
-    private func handleActionSetTitle(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleActionSetTitle(ctx: MessageContext, body: [String: Any]) {
         let params = body["params"] as? [String: Any] ?? [:]
 
         if let title = params["title"] as? String {
-            let oldTitle = ExtensionManager.shared.actionTitle[extensionID]
-            ExtensionManager.shared.actionTitle[extensionID] = title
+            let oldTitle = ExtensionManager.shared.actionTitle[ctx.extensionID]
+            ExtensionManager.shared.actionTitle[ctx.extensionID] = title
             if title != oldTitle {
                 NotificationCenter.default.post(name: ExtensionManager.extensionActionDidChangeNotification, object: nil,
-                                                userInfo: ["extensionID": extensionID])
+                                                userInfo: ["extensionID": ctx.extensionID])
             }
         }
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: [:] as [String: Any])
     }
 
-    private func handleActionGetTitle(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
-
-        let title = ExtensionManager.shared.actionTitle[extensionID] ?? ""
-        deliverCallbackResponse(callbackID: callbackID, result: title, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+    private func handleActionGetTitle(ctx: MessageContext, body: [String: Any]) {
+        let title = ExtensionManager.shared.actionTitle[ctx.extensionID] ?? ""
+        deliverResponse(ctx, result: title)
     }
 
-    private func handleActionSetPopup(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
-
+    private func handleActionSetPopup(ctx: MessageContext, body: [String: Any]) {
         // Store but don't actively use yet (popup URL override)
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: [:] as [String: Any])
     }
 
     // MARK: - Commands Handlers
 
-    private func handleCommandsGetAll(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
-
-        guard let ext = ExtensionManager.shared.extension(withID: extensionID) else {
-            deliverCallbackResponse(callbackID: callbackID, result: [], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+    private func handleCommandsGetAll(ctx: MessageContext, body: [String: Any]) {
+        guard let ext = ExtensionManager.shared.extension(withID: ctx.extensionID) else {
+            deliverResponse(ctx, result: [] as [[String: Any]])
             return
         }
 
@@ -1408,7 +1477,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             }
         }
 
-        deliverCallbackResponse(callbackID: callbackID, result: commands, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: commands)
     }
 
     // MARK: - Window Info Builder
@@ -1426,10 +1495,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
     // MARK: - Windows Handlers
 
-    private func handleWindowsGetAll(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
-
+    private func handleWindowsGetAll(ctx: MessageContext, body: [String: Any]) {
         let mgr = ExtensionManager.shared
         var windows: [[String: Any]] = []
 
@@ -1440,7 +1506,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             let params = body["params"] as? [String: Any] ?? [:]
             let queryOptions = params["queryOptions"] as? [String: Any] ?? [:]
             if queryOptions["populate"] as? Bool == true {
-                let ext = mgr.extension(withID: extensionID)
+                let ext = mgr.extension(withID: ctx.extensionID)
                 let includeURLFields = ext.map { ExtensionPermissionChecker.hasPermission("tabs", extension: $0) } ?? true
                 var tabs: [[String: Any]] = []
                 for tab in space.tabs {
@@ -1453,13 +1519,11 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             windows.append(windowInfo)
         }
 
-        deliverCallbackResponse(callbackID: callbackID, result: windows, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: windows)
     }
 
-    private func handleWindowsGet(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let params = body["params"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleWindowsGet(ctx: MessageContext, body: [String: Any]) {
+        guard let params = body["params"] as? [String: Any] else { return }
 
         let windowId = params["windowId"] as? Int
         let mgr = ExtensionManager.shared
@@ -1467,31 +1531,24 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         if let windowId, let spaceUUID = mgr.spaceIDMap.uuid(for: windowId),
            let space = TabStore.shared.space(withID: spaceUUID) {
             let windowInfo = buildWindowInfo(space: space, focused: space.id == mgr.lastActiveSpaceID)
-            deliverCallbackResponse(callbackID: callbackID, result: windowInfo, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: windowInfo)
         } else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Window not found"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "Window not found"])
         }
     }
 
-    private func handleWindowsGetCurrent(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
-
+    private func handleWindowsGetCurrent(ctx: MessageContext, body: [String: Any]) {
         let mgr = ExtensionManager.shared
         if let activeSpaceID = mgr.lastActiveSpaceID,
            let space = TabStore.shared.space(withID: activeSpaceID) {
             let windowInfo = buildWindowInfo(space: space, focused: true)
-            deliverCallbackResponse(callbackID: callbackID, result: windowInfo, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: windowInfo)
         } else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "No current window"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "No current window"])
         }
     }
 
-    private func handleWindowsCreate(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleWindowsCreate(ctx: MessageContext, body: [String: Any]) {
         let params = body["params"] as? [String: Any] ?? [:]
         let createData = params["createData"] as? [String: Any] ?? [:]
 
@@ -1505,8 +1562,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         } else if let first = TabStore.shared.spaces.first {
             profileID = first.profileID
         } else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "No profile available"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "No profile available"])
             return
         }
         let space = TabStore.shared.addSpace(name: "Window", emoji: "🌐", colorHex: "#333333", profileID: profileID)
@@ -1515,13 +1571,11 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         }
 
         let windowInfo = buildWindowInfo(space: space, focused: true)
-        deliverCallbackResponse(callbackID: callbackID, result: windowInfo, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: windowInfo)
     }
 
-    private func handleWindowsUpdate(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let params = body["params"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleWindowsUpdate(ctx: MessageContext, body: [String: Any]) {
+        guard let params = body["params"] as? [String: Any] else { return }
 
         let windowId = params["windowId"] as? Int
         let mgr = ExtensionManager.shared
@@ -1535,19 +1589,15 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             }
 
             let windowInfo = buildWindowInfo(space: space, focused: space.id == mgr.lastActiveSpaceID)
-            deliverCallbackResponse(callbackID: callbackID, result: windowInfo, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: windowInfo)
         } else {
-            deliverCallbackResponse(callbackID: callbackID, result: ["__error": "Window not found"],
-                                    extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            deliverResponse(ctx, result: ["__error": "Window not found"])
         }
     }
 
     // MARK: - Font Settings Handlers
 
-    private func handleFontSettingsGetFontList(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
-
+    private func handleFontSettingsGetFontList(ctx: MessageContext, body: [String: Any]) {
         let fontFamilies = NSFontManager.shared.availableFontFamilies
         let fontList = fontFamilies.map { family -> [String: String] in
             ["fontId": family, "displayName": family]
@@ -1555,20 +1605,18 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
         guard let resultData = try? JSONSerialization.data(withJSONObject: fontList),
               let resultJSON = String(data: resultData, encoding: .utf8) else { return }
-        deliverJS("window.__extensionDeliverResponse('\(callbackID)', \(resultJSON));",
-                  extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverJS("window.__extensionDeliverResponse('\(ctx.callbackID)', \(resultJSON));",
+                  extensionID: ctx.extensionID, webView: ctx.sourceWebView, isContentScript: ctx.isContentScript)
     }
 
     // MARK: - Permissions Handlers
 
-    private func handlePermissionsContains(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
+    private func handlePermissionsContains(ctx: MessageContext, body: [String: Any]) {
         guard let params = body["params"] as? [String: Any],
-              let permissions = params["permissions"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+              let permissions = params["permissions"] as? [String: Any] else { return }
 
-        guard let ext = ExtensionManager.shared.extension(withID: extensionID) else {
-            deliverCallbackResponse(callbackID: callbackID, result: false, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        guard let ext = ExtensionManager.shared.extension(withID: ctx.extensionID) else {
+            deliverResponse(ctx, result: false)
             return
         }
 
@@ -1595,21 +1643,19 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             }
         }
 
-        deliverCallbackResponse(callbackID: callbackID, result: hasAll, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: hasAll)
     }
 
     // MARK: - Runtime: setUninstallURL
 
-    private func handleRuntimeSetUninstallURL(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
-        guard let params = body["params"] as? [String: Any],
-              let callbackID = body["callbackID"] as? String else { return }
-        let isContentScript = body["isContentScript"] as? Bool ?? true
+    private func handleRuntimeSetUninstallURL(ctx: MessageContext, body: [String: Any]) {
+        let params = body["params"] as? [String: Any] ?? [:]
 
         if let urlString = params["url"] as? String, let url = URL(string: urlString) {
-            ExtensionManager.shared.uninstallURLs[extensionID] = url
+            ExtensionManager.shared.uninstallURLs[ctx.extensionID] = url
         }
 
-        deliverCallbackResponse(callbackID: callbackID, result: [:], extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        deliverResponse(ctx, result: [:] as [String: Any])
     }
 
     // MARK: - JS Delivery

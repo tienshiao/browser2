@@ -146,14 +146,7 @@ struct ChromeAlarmsAPI {
                 return Promise.resolve(all);
             };
 
-            chrome.alarms.onAlarm = {
-                addListener: function(cb) { onAlarmListeners.push(cb); },
-                removeListener: function(cb) {
-                    const idx = onAlarmListeners.indexOf(cb);
-                    if (idx !== -1) onAlarmListeners.splice(idx, 1);
-                },
-                hasListener: function(cb) { return onAlarmListeners.includes(cb); }
-            };
+            chrome.alarms.onAlarm = __detourMakeEventEmitter(onAlarmListeners);
         })();
         """
     }

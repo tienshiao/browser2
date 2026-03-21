@@ -76,11 +76,8 @@ struct ChromeActionAPI {
                 return promise;
             };
 
-            chrome.action.onClicked = {
-                addListener: function(cb) {},
-                removeListener: function(cb) {},
-                hasListener: function(cb) { return false; }
-            };
+            var _onClickedListeners = [];
+            chrome.action.onClicked = __detourMakeEventEmitter(_onClickedListeners);
         })();
         """
     }
