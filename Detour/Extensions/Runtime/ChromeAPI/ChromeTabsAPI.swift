@@ -75,7 +75,7 @@ struct ChromeTabsAPI {
                     callback = options;
                     options = {};
                 }
-                const promise = tabsRequest('sendMessage', { tabId: tabId, message: message });
+                const promise = tabsRequest('sendMessage', { tabId: tabId, message: message, options: options || {} });
                 if (callback) { promise.then(callback); return; }
                 return promise;
             };

@@ -209,10 +209,23 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         if let senderURL = sourceWebView?.url?.absoluteString {
             sender["url"] = senderURL
         }
-        // For content scripts, include sender.tab and sender.frameId.
-        // Dark Reader uses sender.tab.id to track which tabs have content scripts.
+        // For content scripts, include sender.tab, sender.frameId, and sender.documentId.
+        // Extensions like Dark Reader use sender.tab.id and sender.documentId to track
+        // which documents have content scripts.
         if isContentScript, let sourceWebView {
-            sender["frameId"] = 0
+            // Use the frameId from the payload (0 for top frame, non-zero for subframes).
+            // This is critical: Chrome assigns unique frameIds per frame, and extensions
+            // like Dark Reader use sender.frameId to track documents. Without unique IDs,
+            // iframe DOCUMENT_CONNECTs overwrite the main frame's entry in TabManager.
+            let frameId = body["frameId"] as? Int ?? 0
+            sender["frameId"] = frameId
+            if let documentId = body["documentId"] as? String {
+                sender["documentId"] = documentId
+                // Cache top-frame documentId for fast verification in tabs.sendMessage
+                if frameId == 0 {
+                    cachedDocumentIds[ObjectIdentifier(sourceWebView)] = documentId
+                }
+            }
             if let (tab, space) = findTabByWebView(sourceWebView) {
                 let isActive = space.selectedTabID == tab.id
                 sender["tab"] = buildTabInfo(tab: tab, space: space, isActive: isActive, includeURLFields: true, extension: ext)
@@ -422,6 +435,11 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
     }
 
     private var pendingResponses: [String: PendingResponse] = [:]
+
+    /// Cached top-frame documentId per tab webView. Updated when content scripts send
+    /// runtime.sendMessage with frameId=0. Used to verify tabs.sendMessage documentId
+    /// without an async evaluateJavaScript round-trip.
+    private var cachedDocumentIds: [ObjectIdentifier: String] = [:]
 
     // MARK: - Tab Info Builder
 
@@ -708,15 +726,57 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         guard let senderData = try? JSONSerialization.data(withJSONObject: sender),
               let senderJSON = String(data: senderData, encoding: .utf8) else { return }
 
-        // Dispatch to the content script world in the target tab
-        let js = "window.__extensionDispatchMessage(\(messageJSON), \(senderJSON), '\(callbackID)');"
-        webView.evaluateJavaScript(js, in: nil, in: ext.contentWorld) { _ in }
+        let options = params["options"] as? [String: Any] ?? [:]
+        let targetDocumentId = options["documentId"] as? String
 
-        // Store pending response to route back to the background script
-        pendingResponses[callbackID] = PendingResponse(
-            sourceWebView: sourceWebView,
-            contentWorld: .page  // Response goes back to background (page world)
-        )
+        // Helper to deliver the message and store the pending response
+        let deliverMessage = { [weak self] in
+            let js = "window.__extensionDispatchMessage(\(messageJSON), \(senderJSON), '\(callbackID)');"
+            webView.evaluateJavaScript(js, in: nil, in: ext.contentWorld) { _ in }
+            self?.pendingResponses[callbackID] = PendingResponse(
+                sourceWebView: sourceWebView,
+                contentWorld: .page  // Response goes back to background (page world)
+            )
+        }
+
+        // Verify documentId for top-frame messages. For iframe messages (non-zero frameId),
+        // deliver unconditionally — the content script's own scriptId check filters correctly.
+        // We can't verify iframe documentIds because evaluateJavaScript only runs in the top frame.
+        let targetFrameId = options["frameId"] as? Int
+        if let targetDocumentId, (targetFrameId == nil || targetFrameId == 0) {
+            // Fast path: check cached documentId (populated by runtime.sendMessage from content scripts)
+            if let cachedDocId = cachedDocumentIds[ObjectIdentifier(webView)] {
+                if cachedDocId != targetDocumentId {
+                    deliverCallbackResponse(callbackID: callbackID,
+                        result: ["__error": "Could not establish connection. Receiving end does not exist."],
+                        extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+                    return
+                }
+            } else {
+                // Slow path: cache miss (e.g. no runtime.sendMessage yet), verify via evaluateJavaScript
+                webView.evaluateJavaScript("window.__detourDocumentId", in: nil, in: ext.contentWorld) { [weak self] result in
+                    if case .success(let value) = result,
+                       let currentDocId = value as? String {
+                        self?.cachedDocumentIds[ObjectIdentifier(webView)] = currentDocId
+                        if currentDocId == targetDocumentId {
+                            deliverMessage()
+                        } else {
+                            self?.deliverCallbackResponse(callbackID: callbackID,
+                                result: ["__error": "Could not establish connection. Receiving end does not exist."],
+                                extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+                        }
+                    } else {
+                        self?.deliverCallbackResponse(callbackID: callbackID,
+                            result: ["__error": "Could not establish connection. Receiving end does not exist."],
+                            extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+                    }
+                }
+                return
+            }
+        }
+
+        // No documentId filter — deliver to all
+        deliverMessage()
     }
 
     // MARK: - Scripting Handlers

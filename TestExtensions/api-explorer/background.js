@@ -236,7 +236,18 @@ async function handleMessage(message) {
     }
 
     case 'sendToTab': {
-      const response = await chrome.tabs.sendMessage(message.tabId, message.message || { type: 'highlight' });
+      const options = message.options || {};
+      const response = await chrome.tabs.sendMessage(message.tabId, message.message || { type: 'highlight' }, options);
+      return { response };
+    }
+
+    case 'sendToTabWithDocumentId': {
+      // Tests tabs.sendMessage with documentId option for targeting specific document instances
+      const response = await chrome.tabs.sendMessage(
+        message.tabId,
+        message.message || { type: 'docIdTest' },
+        { documentId: message.documentId }
+      );
       return { response };
     }
 

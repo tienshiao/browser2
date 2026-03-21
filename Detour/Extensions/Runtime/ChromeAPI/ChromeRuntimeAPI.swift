@@ -23,6 +23,15 @@ struct ChromeRuntimeAPI {
             var onConnectListeners = [];
             var nextPortID = 1;
 
+            // Generate a unique documentId per page load, mirroring Chrome's behavior.
+            // Re-executed on each navigation since WKUserScripts re-run.
+            const documentId = (crypto && crypto.randomUUID) ? crypto.randomUUID() :
+                'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    var r = Math.random() * 16 | 0;
+                    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+                });
+            window.__detourDocumentId = documentId;
+
             chrome.runtime.id = extensionID;
 
             chrome.runtime.getManifest = function() {
@@ -33,6 +42,17 @@ struct ChromeRuntimeAPI {
                 return 'extension://' + extensionID + '/' + (path.startsWith('/') ? path.substring(1) : path);
             };
 
+            // Assign a stable frameId: 0 for top frame, unique non-zero for subframes.
+            // Chrome gives each frame a unique integer ID; we approximate this so that
+            // iframe DOCUMENT_CONNECTs don't overwrite the main frame's TabManager entry.
+            const __detourFrameId = (function() {
+                if (window === window.top) return 0;
+                const s = document.location.href + documentId;
+                let h = 0;
+                for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+                return Math.abs(h) || 1;
+            })();
+
             chrome.runtime.sendMessage = function(message, responseCallback) {
                 return new Promise(function(resolve) {
                     const callbackID = 'cb_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -41,7 +61,9 @@ struct ChromeRuntimeAPI {
                         type: 'runtime.sendMessage',
                         message: message,
                         callbackID: callbackID,
-                        isContentScript: \(isContentScript ? "true" : "false")
+                        isContentScript: \(isContentScript ? "true" : "false"),
+                        documentId: window.__detourDocumentId,
+                        frameId: __detourFrameId
                     };
 
                     // Store callback for response

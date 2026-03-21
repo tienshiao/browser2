@@ -69,7 +69,7 @@ final class ExtensionAPIIntegrationTests: XCTestCase {
                 sendResponse({ type: 'pong', original: message });
             }
             if (message.type === 'getSender') {
-                sendResponse({ id: sender.id, url: sender.url, origin: sender.origin, tab: sender.tab, frameId: sender.frameId });
+                sendResponse({ id: sender.id, url: sender.url, origin: sender.origin, tab: sender.tab, frameId: sender.frameId, documentId: sender.documentId });
             }
             return true;
         });
@@ -1132,6 +1132,109 @@ final class ExtensionAPIIntegrationTests: XCTestCase {
         }
         XCTAssertNil(json["tab"], "sender.tab should NOT be present for popup messages")
         XCTAssertNil(json["frameId"], "sender.frameId should NOT be present for popup messages")
+    }
+
+    // MARK: - sender.documentId
+
+    func testContentScriptSendMessageIncludesSenderDocumentId() {
+        let result = tabCallAsync("""
+            const response = await chrome.runtime.sendMessage({ type: 'getSender' });
+            return JSON.stringify(response);
+        """)
+        guard let jsonString = result as? String,
+              let data = jsonString.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            XCTFail("Failed to parse sender JSON: \(String(describing: result))")
+            return
+        }
+        let documentId = json["documentId"] as? String
+        XCTAssertNotNil(documentId, "sender.documentId should be present for content script messages")
+        XCTAssertTrue(documentId?.count ?? 0 > 10, "sender.documentId should be a UUID-like string")
+    }
+
+    func testDocumentIdIsStableWithinSamePage() {
+        // Two messages from the same page should have the same documentId
+        let result1 = tabCallAsync("""
+            const response = await chrome.runtime.sendMessage({ type: 'getSender' });
+            return response.documentId;
+        """)
+        let result2 = tabCallAsync("""
+            const response = await chrome.runtime.sendMessage({ type: 'getSender' });
+            return response.documentId;
+        """)
+        let docId1 = result1 as? String
+        let docId2 = result2 as? String
+        XCTAssertNotNil(docId1)
+        XCTAssertEqual(docId1, docId2, "documentId should be stable within the same page load")
+    }
+
+    func testPopupSendMessageDoesNotIncludeDocumentId() {
+        let result = popupCallAsync("""
+            const response = await chrome.runtime.sendMessage({ type: 'getSender' });
+            return JSON.stringify(response);
+        """)
+        guard let jsonString = result as? String,
+              let data = jsonString.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            XCTFail("Failed to parse sender JSON: \(String(describing: result))")
+            return
+        }
+        XCTAssertNil(json["documentId"], "sender.documentId should NOT be present for popup messages")
+    }
+
+    // MARK: - tabs.sendMessage with documentId option
+
+    func testTabsSendMessageWithMatchingDocumentId() {
+        // Get the tab's documentId first
+        let docIdResult = tabCallAsync("return window.__detourDocumentId;")
+        guard let documentId = docIdResult as? String else {
+            XCTFail("Failed to get documentId from tab")
+            return
+        }
+
+        // Register a listener on the tab
+        tabCallAsyncVoid("""
+            window.__testMsgReceived = null;
+            chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
+                if (msg.type === 'docIdTest') {
+                    window.__testMsgReceived = msg.data;
+                    sendResponse({ ok: true });
+                }
+                return true;
+            });
+        """)
+
+        // Send from popup with matching documentId
+        let result = popupCallAsync("""
+            const response = await chrome.tabs.sendMessage(\(testTabIntID!),
+                { type: 'docIdTest', data: 'hello' },
+                { documentId: '\(documentId)' });
+            return JSON.stringify(response);
+        """)
+        guard let jsonString = result as? String,
+              let data = jsonString.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            XCTFail("Failed to parse response: \(String(describing: result))")
+            return
+        }
+        XCTAssertEqual(json["ok"] as? Bool, true, "Message should be delivered with matching documentId")
+    }
+
+    func testTabsSendMessageWithWrongDocumentIdFails() {
+        // Send from popup with a non-matching documentId
+        let result = popupCallAsync("""
+            try {
+                await chrome.tabs.sendMessage(\(testTabIntID!),
+                    { type: 'test' },
+                    { documentId: 'wrong-document-id-12345' });
+                return 'should-have-thrown';
+            } catch(e) {
+                return e.message;
+            }
+        """)
+        let error = result as? String ?? ""
+        XCTAssertTrue(error.contains("does not exist"),
+                      "Should fail with connection error for wrong documentId, got: \(error)")
     }
 
     // MARK: - Tab URL field visibility (host permissions)
