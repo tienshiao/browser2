@@ -27,7 +27,7 @@ struct ChromeAPIBundle {
     static func generateBundle(for ext: WebExtension, isContentScript: Bool = true) -> String {
         var parts: [String] = []
         parts.append(eventEmitterJS)
-        parts.append(ChromeRuntimeAPI.generateJS(extensionID: ext.id, manifest: ext.manifest, isContentScript: isContentScript))
+        parts.append(ChromeRuntimeAPI.generateJS(extensionID: ext.id, manifest: ext.manifest, isContentScript: isContentScript, rawManifestJSON: ext.rawManifestJSON))
         parts.append(ChromeStorageAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
         parts.append(ChromeTabsAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
         parts.append(ChromeScriptingAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
@@ -43,6 +43,17 @@ struct ChromeAPIBundle {
         parts.append(ChromeWindowsAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
         parts.append(ChromeFontSettingsAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
         parts.append(ChromePermissionsAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
+        parts.append(ChromeIdleAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
+        parts.append(ChromeNotificationsAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
+        parts.append(ChromePrivacyAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
+        parts.append(ChromeManagementAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
+        parts.append(ChromeDeclarativeNetRequestAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
+        parts.append(ChromeDownloadsAPI.generateJS(extensionID: ext.id, isContentScript: isContentScript))
+
+        // Alias: Chrome MV3 provides `browser` as an alias for `chrome`.
+        // Many extensions (including 1Password) use `browser.*` APIs.
+        parts.append("if (typeof browser === 'undefined') { window.browser = window.chrome; }")
+
         return parts.joined(separator: "\n\n")
     }
 }

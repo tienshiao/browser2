@@ -131,7 +131,7 @@ extension ExtensionPopoverController: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        // Allow initial loads and extension:// navigations
+        // Allow initial loads and chrome-extension:// navigations
         if navigationAction.navigationType == .other || navigationAction.request.url?.scheme == ExtensionPageSchemeHandler.scheme {
             decisionHandler(.allow)
             return

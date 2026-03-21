@@ -268,12 +268,12 @@ final class ExtensionAPIIntegrationTests: XCTestCase {
 
     func testRuntimeGetURLReturnsCorrectFormat() {
         let result = evalSync("chrome.runtime.getURL('popup.html')")
-        XCTAssertEqual(result as? String, "extension://\(ext.id)/popup.html")
+        XCTAssertEqual(result as? String, "chrome-extension://\(ext.id)/popup.html")
     }
 
     func testRuntimeGetURLRootPath() {
         let result = evalSync("chrome.runtime.getURL('/')")
-        XCTAssertEqual(result as? String, "extension://\(ext.id)/")
+        XCTAssertEqual(result as? String, "chrome-extension://\(ext.id)/")
     }
 
     func testRuntimeOnMessageAPIShape() {

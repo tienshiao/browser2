@@ -35,6 +35,10 @@ struct ExtensionPermissionChecker {
         case "offscreen":    return "offscreen"
         case "alarms":       return "alarms"
         case "fontSettings": return "fontSettings"
+        case "downloads":  return "downloads"
+        case "nativeMessaging": return "nativeMessaging"
+        case "idle":         return "idle"
+        case "notifications": return "notifications"
         case "runtime":      return nil
         case "action":       return nil
         case "commands":     return nil
@@ -71,6 +75,9 @@ struct ExtensionPermissionChecker {
             case "bookmarks":     descriptions.append("Access your bookmarks")
             case "alarms":        descriptions.append("Schedule periodic tasks")
             case "fontSettings":  descriptions.append("Access font settings")
+            case "nativeMessaging": descriptions.append("Communicate with native applications")
+            case "idle":          descriptions.append("Detect when your system is idle")
+            case "notifications": descriptions.append("Show notifications")
             default:              descriptions.append("Use the \"\(perm)\" API")
             }
         }

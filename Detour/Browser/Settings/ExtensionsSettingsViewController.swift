@@ -243,32 +243,65 @@ class ExtensionsSettingsViewController: NSViewController, NSTableViewDataSource,
         let permsHeader = NSTextField(labelWithString: "Permissions")
         permsHeader.font = .systemFont(ofSize: 13, weight: .medium)
 
-        var permViews: [NSView] = [permsHeader]
+        var permContentViews: [NSView] = []
         if permsSummary.isEmpty {
             let noneLabel = NSTextField(labelWithString: "No special permissions requested.")
             noneLabel.font = .systemFont(ofSize: 12)
             noneLabel.textColor = .secondaryLabelColor
-            permViews.append(noneLabel)
+            permContentViews.append(noneLabel)
         } else {
             for perm in permsSummary {
                 let permLabel = NSTextField(labelWithString: "\u{2022} \(perm)")
                 permLabel.font = .systemFont(ofSize: 12)
                 permLabel.textColor = .secondaryLabelColor
-                permViews.append(permLabel)
+                permContentViews.append(permLabel)
             }
         }
 
-        let permsStack = NSStackView(views: permViews)
+        let permContentStack = NSStackView(views: permContentViews)
+        permContentStack.orientation = .vertical
+        permContentStack.alignment = .leading
+        permContentStack.spacing = 4
+        permContentStack.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
+
+        // Use a flipped NSView as the document view so content starts at the top
+        let flippedDocView = FlippedView()
+        flippedDocView.translatesAutoresizingMaskIntoConstraints = false
+        flippedDocView.addSubview(permContentStack)
+        permContentStack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            permContentStack.topAnchor.constraint(equalTo: flippedDocView.topAnchor),
+            permContentStack.leadingAnchor.constraint(equalTo: flippedDocView.leadingAnchor),
+            permContentStack.trailingAnchor.constraint(equalTo: flippedDocView.trailingAnchor),
+            permContentStack.bottomAnchor.constraint(equalTo: flippedDocView.bottomAnchor),
+        ])
+
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = flippedDocView
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.borderType = .bezelBorder
+        scrollView.backgroundColor = .controlBackgroundColor
+        scrollView.drawsBackground = true
+
+        scrollView.setContentHuggingPriority(.defaultLow - 1, for: .vertical)
+        scrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+
+        let permsStack = NSStackView(views: [permsHeader, scrollView])
         permsStack.orientation = .vertical
         permsStack.alignment = .leading
         permsStack.spacing = 4
+        permsStack.setHuggingPriority(.defaultLow - 1, for: .vertical)
 
         // Uninstall button
         let uninstallButton = NSButton(title: "Uninstall Extension", target: self, action: #selector(uninstallClicked))
         uninstallButton.controlSize = .regular
+        uninstallButton.translatesAutoresizingMaskIntoConstraints = false
+        detailContainer.addSubview(uninstallButton)
 
-        // Main stack
-        let mainStack = NSStackView(views: [headerStack, descLabel, sep, enabledRow, permsStack, uninstallButton])
+        // Main stack (everything above uninstall)
+        let mainStack = NSStackView(views: [headerStack, descLabel, sep, enabledRow, permsStack])
         mainStack.orientation = .vertical
         mainStack.alignment = .leading
         mainStack.spacing = 12
@@ -278,7 +311,12 @@ class ExtensionsSettingsViewController: NSViewController, NSTableViewDataSource,
         NSLayoutConstraint.activate([
             mainStack.topAnchor.constraint(equalTo: detailContainer.topAnchor, constant: 8),
             mainStack.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor),
-            mainStack.trailingAnchor.constraint(lessThanOrEqualTo: detailContainer.trailingAnchor),
+            mainStack.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor),
+            scrollView.widthAnchor.constraint(equalTo: detailContainer.widthAnchor),
+            flippedDocView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            uninstallButton.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor),
+            uninstallButton.bottomAnchor.constraint(equalTo: detailContainer.bottomAnchor),
+            mainStack.bottomAnchor.constraint(lessThanOrEqualTo: uninstallButton.topAnchor, constant: -12),
         ])
     }
 
@@ -395,14 +433,6 @@ class ExtensionsSettingsViewController: NSViewController, NSTableViewDataSource,
             nameLabel.tag = 1
             cell.addSubview(nameLabel)
 
-            let versionLabel = NSTextField(labelWithString: "")
-            versionLabel.font = .systemFont(ofSize: 11)
-            versionLabel.textColor = .secondaryLabelColor
-            versionLabel.translatesAutoresizingMaskIntoConstraints = false
-            versionLabel.tag = 2
-            versionLabel.setContentHuggingPriority(.required, for: .horizontal)
-            cell.addSubview(versionLabel)
-
             NSLayoutConstraint.activate([
                 iconView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
                 iconView.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
@@ -410,9 +440,7 @@ class ExtensionsSettingsViewController: NSViewController, NSTableViewDataSource,
                 iconView.heightAnchor.constraint(equalToConstant: 16),
                 nameLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 6),
                 nameLabel.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                versionLabel.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
-                versionLabel.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: versionLabel.leadingAnchor, constant: -4),
+                nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
             ])
         }
 
@@ -430,9 +458,6 @@ class ExtensionsSettingsViewController: NSViewController, NSTableViewDataSource,
         if let nameLabel = cell.viewWithTag(1) as? NSTextField {
             nameLabel.stringValue = ExtensionI18n.resolve(ext.manifest.name, messages: ext.messages)
         }
-        if let versionLabel = cell.viewWithTag(2) as? NSTextField {
-            versionLabel.stringValue = ext.manifest.version
-        }
         return cell
     }
 
@@ -442,4 +467,10 @@ class ExtensionsSettingsViewController: NSViewController, NSTableViewDataSource,
         selectedIndex = row
         updateDetail()
     }
+}
+
+/// An NSView subclass with flipped coordinates so content starts at the top.
+/// Used as an NSScrollView document view for top-aligned content.
+private class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }

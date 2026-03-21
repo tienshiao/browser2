@@ -301,9 +301,14 @@ class BrowserWindowController: NSWindowController {
                 toolbar.removeItem(at: i)
             }
         }
-        // Add items for extensions enabled in the current profile
+        // Add items for extensions enabled in the current profile, skipping duplicates
         let profileID = activeSpace?.profileID
+        var insertedIDs = Set<NSToolbarItem.Identifier>()
         for id in ExtensionToolbarManager.toolbarItemIdentifiers(profileID: profileID) {
+            guard !insertedIDs.contains(id) else { continue }
+            // Also check if the toolbar already contains this item (defensive)
+            guard !toolbar.items.contains(where: { $0.itemIdentifier == id }) else { continue }
+            insertedIDs.insert(id)
             toolbar.insertItem(withItemIdentifier: id, at: toolbar.items.count)
         }
     }

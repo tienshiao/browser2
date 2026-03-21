@@ -61,6 +61,36 @@ private enum MsgType {
 
     static let fontSettingsGetFontList = "fontSettings.getFontList"
     static let permissionsContains = "permissions.contains"
+
+    static let runtimeConnectNative = "runtime.connectNative"
+    static let runtimeSendNativeMessage = "runtime.sendNativeMessage"
+
+    static let tabsReload = "tabs.reload"
+    static let tabsInsertCSS = "tabs.insertCSS"
+
+    static let webNavigationGetAllFrames = "webNavigation.getAllFrames"
+    static let webNavigationGetFrame = "webNavigation.getFrame"
+
+    static let idleQueryState = "idle.queryState"
+    static let idleSetDetectionInterval = "idle.setDetectionInterval"
+
+    static let managementGetSelf = "management.getSelf"
+    static let managementGetAll = "management.getAll"
+    static let managementSetEnabled = "management.setEnabled"
+
+    static let actionOpenPopup = "action.openPopup"
+    static let actionGetUserSettings = "action.getUserSettings"
+
+    static let tabsCaptureVisibleTab = "tabs.captureVisibleTab"
+
+    static let runtimeReload = "runtime.reload"
+
+    static let downloadsDownload = "downloads.download"
+
+    static let notificationsCreate = "notifications.create"
+    static let notificationsUpdate = "notifications.update"
+    static let notificationsClear = "notifications.clear"
+    static let notificationsGetAll = "notifications.getAll"
 }
 
 /// Routes messages between content scripts, background scripts, and native code.
@@ -86,17 +116,32 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         }
     }
 
+    /// Tracks which (controller, world) pairs have been registered to avoid the
+    /// "handler already exists" NSInvalidArgumentException. Uses NSMapTable with
+    /// weak keys so entries are automatically cleaned up when controllers dealloc.
+    private let registeredWorlds = NSMapTable<WKUserContentController, NSMutableSet>.weakToStrongObjects()
+
     private override init() {
         super.init()
     }
 
     /// Register the bridge on a WKUserContentController. Safe to call multiple times.
     func register(on controller: WKUserContentController) {
+        let worldKey = "__page__" as NSString
+        if let worlds = registeredWorlds.object(forKey: controller), worlds.contains(worldKey) { return }
+        let worlds = registeredWorlds.object(forKey: controller) ?? NSMutableSet()
+        worlds.add(worldKey)
+        registeredWorlds.setObject(worlds, forKey: controller)
         controller.add(self, name: Self.handlerName)
     }
 
     /// Register the bridge on a WKUserContentController in a specific content world.
     func register(on controller: WKUserContentController, contentWorld: WKContentWorld) {
+        let worldKey = (contentWorld.name ?? "__page__") as NSString
+        if let worlds = registeredWorlds.object(forKey: controller), worlds.contains(worldKey) { return }
+        let worlds = registeredWorlds.object(forKey: controller) ?? NSMutableSet()
+        worlds.add(worldKey)
+        registeredWorlds.setObject(worlds, forKey: controller)
         controller.add(self, contentWorld: contentWorld, name: Self.handlerName)
     }
 
@@ -106,6 +151,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         guard let body = message.body as? [String: Any],
               let extensionID = body["extensionID"] as? String,
               let type = body["type"] as? String else { return }
+
 
         // Periodic cleanup of stale entries
         messageCount += 1
@@ -311,6 +357,83 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
             guard let ctx else { return }
             handleRuntimeSetUninstallURL(ctx: ctx, body: body)
 
+        // Native messaging
+        case MsgType.runtimeConnectNative:
+            handleRuntimeConnectNative(body: body, extensionID: extensionID, sourceWebView: message.webView)
+        case MsgType.runtimeSendNativeMessage:
+            guard let ctx else { return }
+            handleRuntimeSendNativeMessage(ctx: ctx, body: body)
+
+        // Tabs: reload, insertCSS
+        case MsgType.tabsReload:
+            guard let ctx else { return }
+            handleTabsReload(ctx: ctx, body: body)
+        case MsgType.tabsInsertCSS:
+            guard let ctx else { return }
+            handleScriptingInsertCSS(ctx: ctx, body: body)
+
+        // WebNavigation: getAllFrames, getFrame
+        case MsgType.webNavigationGetAllFrames:
+            guard let ctx else { return }
+            handleWebNavigationGetAllFrames(ctx: ctx, body: body)
+        case MsgType.webNavigationGetFrame:
+            guard let ctx else { return }
+            handleWebNavigationGetFrame(ctx: ctx, body: body)
+
+        // Downloads
+        case MsgType.downloadsDownload:
+            guard let ctx else { return }
+            handleDownloadsDownload(ctx: ctx, body: body)
+
+        // Management
+        case MsgType.managementGetSelf:
+            guard let ctx else { return }
+            handleManagementGetSelf(ctx: ctx, body: body)
+        case MsgType.managementGetAll:
+            guard let ctx else { return }
+            handleManagementGetAll(ctx: ctx, body: body)
+        case MsgType.managementSetEnabled:
+            guard let ctx else { return }
+            handleManagementSetEnabled(ctx: ctx, body: body)
+
+        // Action enhancements
+        case MsgType.actionOpenPopup:
+            guard let ctx else { return }
+            deliverResponse(ctx, result: [:] as [String: Any]) // stub
+        case MsgType.actionGetUserSettings:
+            guard let ctx else { return }
+            deliverResponse(ctx, result: ["isOnToolbar": true])
+
+        // Tabs: captureVisibleTab
+        case MsgType.tabsCaptureVisibleTab:
+            guard let ctx else { return }
+            handleTabsCaptureVisibleTab(ctx: ctx, body: body)
+
+        // Runtime: reload
+        case MsgType.runtimeReload:
+            handleRuntimeReload(body: body, extensionID: extensionID)
+
+        // Notifications
+        case MsgType.notificationsCreate:
+            guard let ctx else { return }
+            handleNotificationsCreate(ctx: ctx, body: body)
+        case MsgType.notificationsUpdate:
+            guard let ctx else { return }
+            handleNotificationsUpdate(ctx: ctx, body: body)
+        case MsgType.notificationsClear:
+            guard let ctx else { return }
+            handleNotificationsClear(ctx: ctx, body: body)
+        case MsgType.notificationsGetAll:
+            guard let ctx else { return }
+            handleNotificationsGetAll(ctx: ctx, body: body)
+
+        // Idle
+        case MsgType.idleQueryState:
+            guard let ctx else { return }
+            handleIdleQueryState(ctx: ctx, body: body)
+        case MsgType.idleSetDetectionInterval:
+            handleIdleSetDetectionInterval(body: body, extensionID: extensionID)
+
         default:
             print("[ExtensionBridge] Unknown message type: \(type)")
         }
@@ -329,7 +452,7 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
         var sender: [String: Any] = [
             "id": ctx.extensionID,
-            "origin": ctx.isContentScript ? "content-script" : "extension"
+            "origin": "chrome-extension://\(ctx.extensionID)"
         ]
         // Include sender URL — extensions like Dark Reader check sender.url to verify popup origin.
         if let senderURL = ctx.sourceWebView?.url?.absoluteString {
@@ -1179,8 +1302,20 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
 
     private func handlePortPostMessage(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
         guard let portID = body["portID"] as? String,
-              let message = body["message"],
-              let port = openPorts[portID] else { return }
+              let message = body["message"] else { return }
+
+        // Check if this is a native messaging port
+        if let host = nativeHosts[portID] {
+            guard let msgDict = message as? [String: Any] else { return }
+            do {
+                try host.sendMessage(msgDict)
+            } catch {
+                print("[ExtensionBridge] Native port postMessage failed: \(error.localizedDescription)")
+            }
+            return
+        }
+
+        guard let port = openPorts[portID] else { return }
 
         guard let messageData = try? JSONSerialization.data(withJSONObject: message),
               let messageJSON = String(data: messageData, encoding: .utf8) else { return }
@@ -1205,8 +1340,15 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
     }
 
     private func handlePortDisconnect(body: [String: Any], extensionID: String) {
-        guard let portID = body["portID"] as? String,
-              let port = openPorts.removeValue(forKey: portID) else { return }
+        guard let portID = body["portID"] as? String else { return }
+
+        // Check if this is a native messaging port
+        if let host = nativeHosts.removeValue(forKey: portID) {
+            host.disconnect()
+            return
+        }
+
+        guard let port = openPorts.removeValue(forKey: portID) else { return }
 
         // Notify the other end
         let js = "if (window.__extensionDispatchPortDisconnect) { window.__extensionDispatchPortDisconnect('\(portID)'); }"
@@ -1454,7 +1596,15 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
     }
 
     private func handleActionSetPopup(ctx: MessageContext, body: [String: Any]) {
-        // Store but don't actively use yet (popup URL override)
+        let params = body["params"] as? [String: Any] ?? [:]
+        if let popup = params["popup"] as? String {
+            if popup.isEmpty {
+                // Empty string means reset to manifest default
+                ExtensionManager.shared.customPopupPaths.removeValue(forKey: ctx.extensionID)
+            } else {
+                ExtensionManager.shared.customPopupPaths[ctx.extensionID] = popup
+            }
+        }
         deliverResponse(ctx, result: [:] as [String: Any])
     }
 
@@ -1656,6 +1806,412 @@ class ExtensionMessageBridge: NSObject, WKScriptMessageHandler {
         }
 
         deliverResponse(ctx, result: [:] as [String: Any])
+    }
+
+    // MARK: - Native Messaging Handlers
+
+    /// Active native messaging hosts keyed by portID.
+    private var nativeHosts: [String: NativeMessagingHost] = [:]
+
+    private func handleRuntimeConnectNative(body: [String: Any], extensionID: String, sourceWebView: WKWebView?) {
+        guard let portID = body["portID"] as? String,
+              let application = body["application"] as? String else { return }
+        let isContentScript = body["isContentScript"] as? Bool ?? true
+
+        guard let ext = ExtensionManager.shared.extension(withID: extensionID) else { return }
+
+        // Check nativeMessaging permission
+        guard ExtensionPermissionChecker.hasPermission("nativeMessaging", extension: ext) else {
+            let errorJS = "if (window.__extensionDispatchPortDisconnect) { window.__extensionDispatchPortDisconnect('\(portID)'); }"
+            deliverJS(errorJS, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+            return
+        }
+
+        let host = NativeMessagingHost(hostName: application, extensionID: extensionID)
+
+        host.onMessage = { [weak self] message in
+            guard let self else { return }
+            guard let messageData = try? JSONSerialization.data(withJSONObject: message),
+                  let messageJSON = String(data: messageData, encoding: .utf8) else { return }
+            let js = "if (window.__extensionDispatchPortMessage) { window.__extensionDispatchPortMessage('\(portID)', \(messageJSON)); }"
+            self.deliverJS(js, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        }
+
+        host.onDisconnect = { [weak self] errorMessage in
+            guard let self else { return }
+            self.nativeHosts.removeValue(forKey: portID)
+            let js = "if (window.__extensionDispatchPortDisconnect) { window.__extensionDispatchPortDisconnect('\(portID)'); }"
+            self.deliverJS(js, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        }
+
+        do {
+            try host.connect()
+            nativeHosts[portID] = host
+        } catch {
+            print("[ExtensionBridge] Native messaging connect failed: \(error.localizedDescription)")
+            let js = "if (window.__extensionDispatchPortDisconnect) { window.__extensionDispatchPortDisconnect('\(portID)'); }"
+            deliverJS(js, extensionID: extensionID, webView: sourceWebView, isContentScript: isContentScript)
+        }
+    }
+
+    private func handleRuntimeSendNativeMessage(ctx: MessageContext, body: [String: Any]) {
+        guard let application = body["application"] as? String,
+              let message = body["message"] as? [String: Any] else {
+            deliverResponse(ctx, result: ["__error": "Invalid arguments"])
+            return
+        }
+
+        guard let ext = ExtensionManager.shared.extension(withID: ctx.extensionID),
+              ExtensionPermissionChecker.hasPermission("nativeMessaging", extension: ext) else {
+            deliverResponse(ctx, result: ["__error": "nativeMessaging permission required"])
+            return
+        }
+
+        let host = NativeMessagingHost(hostName: application, extensionID: ctx.extensionID)
+        let portID = "oneshot_\(ctx.callbackID)"
+
+        host.onMessage = { [weak self] response in
+            guard let self else { return }
+            self.deliverResponse(ctx, result: response)
+            host.disconnect()
+            self.nativeHosts.removeValue(forKey: portID)
+        }
+
+        host.onDisconnect = { [weak self] errorMessage in
+            guard let self else { return }
+            self.nativeHosts.removeValue(forKey: portID)
+            let msg = errorMessage ?? "Native host disconnected"
+            self.deliverResponse(ctx, result: ["__error": msg])
+        }
+
+        do {
+            try host.connect()
+            nativeHosts[portID] = host
+            try host.sendMessage(message)
+        } catch {
+            nativeHosts.removeValue(forKey: portID)
+            deliverResponse(ctx, result: ["__error": error.localizedDescription])
+        }
+    }
+
+    /// Clean up all native messaging hosts for a given extension.
+    func disconnectAllNativeHosts(for extensionID: String) {
+        let portsToRemove = nativeHosts.filter { $0.value.extensionID == extensionID }
+        for (portID, host) in portsToRemove {
+            host.disconnect()
+            nativeHosts.removeValue(forKey: portID)
+        }
+    }
+
+    // MARK: - Tabs: reload
+
+    private func handleTabsReload(ctx: MessageContext, body: [String: Any]) {
+        let params = body["params"] as? [String: Any] ?? [:]
+        let mgr = ExtensionManager.shared
+        let tabIDInt = params["tabId"] as? Int
+
+        var targetTab: BrowserTab?
+        if let tabIDInt, let uuid = mgr.tabIDMap.uuid(for: tabIDInt) {
+            (targetTab, _) = findTab(uuid: uuid)
+        } else if let activeID = mgr.lastActiveSpaceID,
+                  let space = TabStore.shared.space(withID: activeID),
+                  let selectedID = space.selectedTabID {
+            (targetTab, _) = findTab(uuid: selectedID)
+        }
+
+        guard let tab = targetTab, let webView = tab.webView else {
+            deliverResponse(ctx, result: ["__error": "Tab not found"])
+            return
+        }
+
+        let reloadProperties = params["reloadProperties"] as? [String: Any] ?? [:]
+        if reloadProperties["bypassCache"] as? Bool == true {
+            webView.reloadFromOrigin()
+        } else {
+            webView.reload()
+        }
+
+        deliverResponse(ctx, result: [:] as [String: Any])
+    }
+
+    // MARK: - WebNavigation: getAllFrames, getFrame
+
+    private func handleWebNavigationGetAllFrames(ctx: MessageContext, body: [String: Any]) {
+        guard let params = body["params"] as? [String: Any],
+              let details = params["details"] as? [String: Any],
+              let tabIDInt = details["tabId"] as? Int else {
+            deliverResponse(ctx, result: ["__error": "tabId required"])
+            return
+        }
+
+        let mgr = ExtensionManager.shared
+        guard let uuid = mgr.tabIDMap.uuid(for: tabIDInt) else {
+            deliverResponse(ctx, result: ["__error": "Tab not found"])
+            return
+        }
+
+        let (tab, _) = findTab(uuid: uuid)
+        guard let tab, let webView = tab.webView else {
+            deliverResponse(ctx, result: ["__error": "Tab has no webView"])
+            return
+        }
+
+        // Return top-level frame info; cross-origin iframes are not enumerable from JS
+        let topFrame: [String: Any] = [
+            "frameId": 0,
+            "parentFrameId": -1,
+            "url": webView.url?.absoluteString ?? ""
+        ]
+        deliverResponse(ctx, result: [topFrame])
+    }
+
+    private func handleWebNavigationGetFrame(ctx: MessageContext, body: [String: Any]) {
+        guard let params = body["params"] as? [String: Any],
+              let details = params["details"] as? [String: Any],
+              let tabIDInt = details["tabId"] as? Int else {
+            deliverResponse(ctx, result: ["__error": "tabId required"])
+            return
+        }
+
+        let frameId = details["frameId"] as? Int ?? 0
+        let mgr = ExtensionManager.shared
+
+        guard let uuid = mgr.tabIDMap.uuid(for: tabIDInt) else {
+            deliverResponse(ctx, result: ["__error": "Tab not found"])
+            return
+        }
+
+        let (tab, _) = findTab(uuid: uuid)
+        guard let tab, let webView = tab.webView else {
+            deliverResponse(ctx, result: ["__error": "Tab has no webView"])
+            return
+        }
+
+        if frameId == 0 {
+            let frameInfo: [String: Any] = [
+                "frameId": 0,
+                "parentFrameId": -1,
+                "url": webView.url?.absoluteString ?? ""
+            ]
+            deliverResponse(ctx, result: frameInfo)
+        } else {
+            deliverResponse(ctx, result: ["__error": "Frame not found"])
+        }
+    }
+
+    // MARK: - Downloads handler
+
+    private func handleDownloadsDownload(ctx: MessageContext, body: [String: Any]) {
+        let params = body["params"] as? [String: Any] ?? [:]
+        let options = params["options"] as? [String: Any] ?? [:]
+
+        guard let urlString = options["url"] as? String,
+              let url = URL(string: urlString) else {
+            deliverResponse(ctx, result: ["__error": "Invalid URL"])
+            return
+        }
+
+        let suggestedFilename = options["filename"] as? String
+
+        // Use URLSession to download the file
+        let task = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, response, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+
+                if let error {
+                    self.deliverResponse(ctx, result: ["__error": error.localizedDescription])
+                    return
+                }
+
+                guard let tempURL else {
+                    self.deliverResponse(ctx, result: ["__error": "Download failed"])
+                    return
+                }
+
+                // Move to Downloads directory
+                let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+                let filename = suggestedFilename ?? (response?.suggestedFilename ?? url.lastPathComponent)
+                let destURL = downloadsDir.appendingPathComponent(filename)
+
+                do {
+                    if FileManager.default.fileExists(atPath: destURL.path) {
+                        try FileManager.default.removeItem(at: destURL)
+                    }
+                    try FileManager.default.moveItem(at: tempURL, to: destURL)
+                    self.deliverResponse(ctx, result: ["downloadId": 1])
+                } catch {
+                    self.deliverResponse(ctx, result: ["__error": error.localizedDescription])
+                }
+            }
+        }
+        task.resume()
+    }
+
+    // MARK: - Management handlers
+
+    private func makeExtensionInfo(_ ext: WebExtension) -> [String: Any] {
+        var info: [String: Any] = [
+            "id": ext.id,
+            "name": ext.manifest.name,
+            "version": ext.manifest.version,
+            "enabled": ext.isEnabled,
+            "type": "extension",
+            "installType": "normal",
+            "mayDisable": true,
+            "isApp": false,
+        ]
+        if let desc = ext.manifest.description { info["description"] = desc }
+        return info
+    }
+
+    private func handleManagementGetSelf(ctx: MessageContext, body: [String: Any]) {
+        guard let ext = ExtensionManager.shared.extension(withID: ctx.extensionID) else {
+            deliverResponse(ctx, result: ["__error": "Extension not found"])
+            return
+        }
+        deliverResponse(ctx, result: makeExtensionInfo(ext))
+    }
+
+    private func handleManagementGetAll(ctx: MessageContext, body: [String: Any]) {
+        let all = ExtensionManager.shared.extensions.map { makeExtensionInfo($0) }
+        deliverResponse(ctx, result: all)
+    }
+
+    private func handleManagementSetEnabled(ctx: MessageContext, body: [String: Any]) {
+        let params = body["params"] as? [String: Any] ?? [:]
+        guard let id = params["id"] as? String,
+              let enabled = params["enabled"] as? Bool else {
+            deliverResponse(ctx, result: ["__error": "id and enabled required"])
+            return
+        }
+        ExtensionManager.shared.setEnabled(id: id, enabled: enabled)
+        deliverResponse(ctx, result: [:] as [String: Any])
+    }
+
+    // MARK: - Tabs: captureVisibleTab
+
+    private func handleTabsCaptureVisibleTab(ctx: MessageContext, body: [String: Any]) {
+        let params = body["params"] as? [String: Any] ?? [:]
+        let mgr = ExtensionManager.shared
+
+        // Find the active tab
+        let windowId = params["windowId"] as? Int
+        let space: Space?
+        if let windowId, let spaceUUID = mgr.spaceIDMap.uuid(for: windowId) {
+            space = TabStore.shared.space(withID: spaceUUID)
+        } else if let activeID = mgr.lastActiveSpaceID {
+            space = TabStore.shared.space(withID: activeID)
+        } else {
+            space = TabStore.shared.spaces.first
+        }
+
+        guard let space, let selectedID = space.selectedTabID else {
+            deliverResponse(ctx, result: ["__error": "No active tab"])
+            return
+        }
+
+        let (tab, _) = findTab(uuid: selectedID)
+        guard let tab, let webView = tab.webView else {
+            deliverResponse(ctx, result: ["__error": "Tab has no webView"])
+            return
+        }
+
+        let options = params["options"] as? [String: Any] ?? [:]
+        let format = options["format"] as? String ?? "png"
+        let quality = options["quality"] as? Int ?? 92
+
+        let config = WKSnapshotConfiguration()
+        webView.takeSnapshot(with: config) { [weak self] image, error in
+            guard let self, let image else {
+                self?.deliverResponse(ctx, result: ["__error": error?.localizedDescription ?? "Snapshot failed"])
+                return
+            }
+
+            let data: Data?
+            if format == "jpeg" {
+                let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                let bitmapRep = cgImage.map { NSBitmapImageRep(cgImage: $0) }
+                data = bitmapRep?.representation(using: .jpeg, properties: [.compressionFactor: CGFloat(quality) / 100.0])
+            } else {
+                let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                let bitmapRep = cgImage.map { NSBitmapImageRep(cgImage: $0) }
+                data = bitmapRep?.representation(using: .png, properties: [:])
+            }
+
+            if let data {
+                let mimeType = format == "jpeg" ? "image/jpeg" : "image/png"
+                let dataURL = "data:\(mimeType);base64,\(data.base64EncodedString())"
+                self.deliverResponse(ctx, result: dataURL)
+            } else {
+                self.deliverResponse(ctx, result: ["__error": "Failed to encode image"])
+            }
+        }
+    }
+
+    // MARK: - Runtime: reload
+
+    private func handleRuntimeReload(body: [String: Any], extensionID: String) {
+        // Reload the extension by stopping and restarting its background host
+        guard let ext = ExtensionManager.shared.extension(withID: extensionID) else { return }
+        ExtensionManager.shared.backgroundHosts[extensionID]?.stop()
+        ExtensionManager.shared.startBackground(for: ext, isFirstRun: false)
+    }
+
+    // MARK: - Notification handlers
+
+    private func handleNotificationsCreate(ctx: MessageContext, body: [String: Any]) {
+        let params = body["params"] as? [String: Any] ?? [:]
+        let notificationId = params["notificationId"] as? String
+        let options = params["options"] as? [String: Any] ?? [:]
+
+        ExtensionNotificationManager.shared.create(extensionID: ctx.extensionID, notificationID: notificationId, options: options) { [weak self] id in
+            self?.deliverResponse(ctx, result: ["notificationId": id])
+        }
+    }
+
+    private func handleNotificationsUpdate(ctx: MessageContext, body: [String: Any]) {
+        let params = body["params"] as? [String: Any] ?? [:]
+        guard let notificationId = params["notificationId"] as? String else {
+            deliverResponse(ctx, result: ["__error": "notificationId required"])
+            return
+        }
+        let options = params["options"] as? [String: Any] ?? [:]
+
+        ExtensionNotificationManager.shared.update(extensionID: ctx.extensionID, notificationID: notificationId, options: options) { [weak self] updated in
+            self?.deliverResponse(ctx, result: ["wasUpdated": updated])
+        }
+    }
+
+    private func handleNotificationsClear(ctx: MessageContext, body: [String: Any]) {
+        let params = body["params"] as? [String: Any] ?? [:]
+        guard let notificationId = params["notificationId"] as? String else {
+            deliverResponse(ctx, result: ["__error": "notificationId required"])
+            return
+        }
+
+        ExtensionNotificationManager.shared.clear(extensionID: ctx.extensionID, notificationID: notificationId) { [weak self] cleared in
+            self?.deliverResponse(ctx, result: ["wasCleared": cleared])
+        }
+    }
+
+    private func handleNotificationsGetAll(ctx: MessageContext, body: [String: Any]) {
+        let all = ExtensionNotificationManager.shared.getAll(extensionID: ctx.extensionID)
+        deliverResponse(ctx, result: all)
+    }
+
+    // MARK: - Idle handlers
+
+    private func handleIdleQueryState(ctx: MessageContext, body: [String: Any]) {
+        let params = body["params"] as? [String: Any] ?? [:]
+        let detectionInterval = params["detectionIntervalInSeconds"] as? Int ?? 60
+        let state = IdleMonitor.shared.queryState(detectionIntervalSeconds: detectionInterval)
+        deliverResponse(ctx, result: state)
+    }
+
+    private func handleIdleSetDetectionInterval(body: [String: Any], extensionID: String) {
+        let params = body["params"] as? [String: Any] ?? [:]
+        let interval = params["intervalInSeconds"] as? Int ?? 60
+        IdleMonitor.shared.setDetectionInterval(interval, for: extensionID)
     }
 
     // MARK: - JS Delivery

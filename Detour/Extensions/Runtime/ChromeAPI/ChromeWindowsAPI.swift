@@ -89,12 +89,34 @@ struct ChromeWindowsAPI {
                 return promise;
             };
 
+            chrome.windows.remove = function(windowId, callback) {
+                const promise = windowsRequest('remove', { windowId: windowId });
+                if (callback) { promise.then(function() { callback(); }); return; }
+                return promise;
+            };
+
             var _onCreatedListeners = [];
             var _onRemovedListeners = [];
             var _onFocusChangedListeners = [];
             chrome.windows.onCreated = __detourMakeEventEmitter(_onCreatedListeners);
             chrome.windows.onRemoved = __detourMakeEventEmitter(_onRemovedListeners);
             chrome.windows.onFocusChanged = __detourMakeEventEmitter(_onFocusChangedListeners);
+
+            // Internal: dispatch window events from native bridge
+            window.__extensionDispatchWindowEvent = function(eventName, data) {
+                var listeners;
+                switch (eventName) {
+                    case 'onCreated': listeners = _onCreatedListeners; break;
+                    case 'onRemoved': listeners = _onRemovedListeners; break;
+                    case 'onFocusChanged': listeners = _onFocusChangedListeners; break;
+                    default: return;
+                }
+                for (var i = 0; i < listeners.length; i++) {
+                    try { listeners[i](data); } catch(e) {
+                        console.error('[chrome.windows.' + eventName + '] listener error:', e);
+                    }
+                }
+            };
         })();
         """
     }

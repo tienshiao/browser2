@@ -40,6 +40,8 @@ class ExtensionManager {
     var actionTitle: [String: String] = [:]
     /// Uninstall URLs per extension, set via chrome.runtime.setUninstallURL.
     var uninstallURLs: [String: URL] = [:]
+    /// Custom popup paths per extension, set via chrome.action.setPopup.
+    var customPopupPaths: [String: String] = [:]
 
     let injector = ContentScriptInjector()
     let tabIDMap = ExtensionTabIDMap()
@@ -181,8 +183,21 @@ class ExtensionManager {
 
     /// Install an extension from an unpacked directory.
     @discardableResult
-    func install(from sourceURL: URL) throws -> WebExtension {
-        let ext = try ExtensionInstaller.install(from: sourceURL)
+    func install(from sourceURL: URL, publicKey: Data? = nil) throws -> WebExtension {
+        let ext = try ExtensionInstaller.install(from: sourceURL, publicKey: publicKey)
+
+        // If an extension with the same ID already exists (e.g. reinstall with Chrome-compatible
+        // IDs derived from the same public key), clean up the old entry first.
+        if let existingIdx = extensions.firstIndex(where: { $0.id == ext.id }) {
+            let old = extensions[existingIdx]
+            stopBackground(for: old.id)
+            ExtensionMessageBridge.shared.disconnectAllNativeHosts(for: old.id)
+            offscreenHosts[old.id]?.stop()
+            offscreenHosts.removeValue(forKey: old.id)
+            contextMenuItems.removeValue(forKey: old.id)
+            extensions.remove(at: existingIdx)
+        }
+
         extensions.append(ext)
         // Wait for the background host to finish loading before injecting content scripts.
         // Content scripts may send runtime.sendMessage immediately, which requires the
@@ -263,6 +278,7 @@ class ExtensionManager {
         }
 
         stopBackground(for: id)
+        ExtensionMessageBridge.shared.disconnectAllNativeHosts(for: id)
         offscreenHosts[id]?.stop()
         offscreenHosts.removeValue(forKey: id)
         contextMenuItems.removeValue(forKey: id)
@@ -271,6 +287,7 @@ class ExtensionManager {
         customIcons.removeValue(forKey: id)
         actionTitle.removeValue(forKey: id)
         uninstallURLs.removeValue(forKey: id)
+        customPopupPaths.removeValue(forKey: id)
         extensions.removeAll { $0.id == id }
         AppDatabase.shared.deleteExtension(id: id)
 
@@ -292,6 +309,7 @@ class ExtensionManager {
             startBackground(for: ext)
         } else {
             stopBackground(for: id)
+            ExtensionMessageBridge.shared.disconnectAllNativeHosts(for: id)
         }
 
         invalidateEnabledExtensionsCache()

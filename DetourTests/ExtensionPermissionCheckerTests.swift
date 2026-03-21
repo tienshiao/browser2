@@ -270,4 +270,58 @@ final class ExtensionPermissionCheckerTests: XCTestCase {
         let summary = ExtensionPermissionChecker.permissionSummary(for: manifest)
         XCTAssertTrue(summary.contains("Access font settings"))
     }
+
+    // MARK: - New permission types (nativeMessaging, idle, notifications)
+
+    func testRequiredPermissionForNativeMessaging() {
+        XCTAssertEqual(ExtensionPermissionChecker.requiredPermission(for: "nativeMessaging.connect"), "nativeMessaging")
+    }
+
+    func testRequiredPermissionForIdle() {
+        XCTAssertEqual(ExtensionPermissionChecker.requiredPermission(for: "idle.queryState"), "idle")
+        XCTAssertEqual(ExtensionPermissionChecker.requiredPermission(for: "idle.setDetectionInterval"), "idle")
+    }
+
+    func testRequiredPermissionForNotifications() {
+        XCTAssertEqual(ExtensionPermissionChecker.requiredPermission(for: "notifications.create"), "notifications")
+        XCTAssertEqual(ExtensionPermissionChecker.requiredPermission(for: "notifications.clear"), "notifications")
+    }
+
+    func testNativeMessagingPermissionPositive() {
+        let ext = makeExtension(permissions: ["nativeMessaging"])
+        XCTAssertTrue(ExtensionPermissionChecker.hasPermission("nativeMessaging", extension: ext))
+    }
+
+    func testNativeMessagingPermissionNegative() {
+        let ext = makeExtension(permissions: ["storage"])
+        XCTAssertFalse(ExtensionPermissionChecker.hasPermission("nativeMessaging", extension: ext))
+    }
+
+    func testIdlePermissionPositive() {
+        let ext = makeExtension(permissions: ["idle"])
+        XCTAssertTrue(ExtensionPermissionChecker.hasPermission("idle", extension: ext))
+    }
+
+    func testIdlePermissionNegative() {
+        let ext = makeExtension(permissions: [])
+        XCTAssertFalse(ExtensionPermissionChecker.hasPermission("idle", extension: ext))
+    }
+
+    func testPermissionSummaryNativeMessaging() {
+        let manifest = makeManifest(permissions: ["nativeMessaging"])
+        let summary = ExtensionPermissionChecker.permissionSummary(for: manifest)
+        XCTAssertTrue(summary.contains("Communicate with native applications"))
+    }
+
+    func testPermissionSummaryIdle() {
+        let manifest = makeManifest(permissions: ["idle"])
+        let summary = ExtensionPermissionChecker.permissionSummary(for: manifest)
+        XCTAssertTrue(summary.contains("Detect when your system is idle"))
+    }
+
+    func testPermissionSummaryNotifications() {
+        let manifest = makeManifest(permissions: ["notifications"])
+        let summary = ExtensionPermissionChecker.permissionSummary(for: manifest)
+        XCTAssertTrue(summary.contains("Show notifications"))
+    }
 }

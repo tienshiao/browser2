@@ -1,6 +1,6 @@
 import Foundation
 
-/// Generates JavaScript that intercepts XMLHttpRequest and fetch for `extension://` URLs
+/// Generates JavaScript that intercepts XMLHttpRequest and fetch for `chrome-extension://` URLs
 /// in content script worlds. WebKit blocks these as mixed content on HTTPS pages, so we
 /// route them through the native message bridge instead.
 struct ChromeResourceInterceptor {

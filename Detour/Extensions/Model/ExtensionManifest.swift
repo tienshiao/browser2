@@ -17,6 +17,7 @@ struct ExtensionManifest: Codable {
     let optionsUI: OptionsUI?
     let icons: [String: String]?
     let commands: [String: Command]?
+    let key: String?
 
     struct Command: Codable {
         let suggestedKey: SuggestedKey?
@@ -96,10 +97,15 @@ struct ExtensionManifest: Codable {
 
     struct Background: Codable {
         let serviceWorker: String?
+        let type: String?
 
         enum CodingKeys: String, CodingKey {
             case serviceWorker = "service_worker"
+            case type
         }
+
+        /// Whether this background script should be loaded as an ES module.
+        var isModule: Bool { type == "module" }
     }
 
     struct ContentScript: Codable {
@@ -135,7 +141,7 @@ struct ExtensionManifest: Codable {
 
     enum CodingKeys: String, CodingKey {
         case manifestVersion = "manifest_version"
-        case name, version, description, permissions, action, background, commands
+        case name, version, description, permissions, action, background, commands, key
         case hostPermissions = "host_permissions"
         case optionalPermissions = "optional_permissions"
         case defaultLocale = "default_locale"

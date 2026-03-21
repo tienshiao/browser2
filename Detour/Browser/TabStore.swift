@@ -82,7 +82,7 @@ class Space {
             config.websiteDataStore = dataStore
         }
 
-        // Register the extension:// scheme so content scripts can load
+        // Register the chrome-extension:// scheme so content scripts can load
         // web-accessible resources via chrome.runtime.getURL()
         ExtensionPageSchemeHandler.register(on: config)
 

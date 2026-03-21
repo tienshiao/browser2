@@ -67,6 +67,28 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   appendLog({ event: 'alarms.onAlarm', alarmName: alarm.name });
 });
 
+// --- Idle ---
+
+chrome.idle.onStateChanged.addListener((newState) => {
+  console.log('[API Explorer] idle.onStateChanged', newState);
+  appendLog({ event: 'idle.onStateChanged', newState });
+});
+
+// Set detection interval to 60 seconds
+chrome.idle.setDetectionInterval(60);
+
+// --- Notifications ---
+
+chrome.notifications.onClicked.addListener((notificationId) => {
+  console.log('[API Explorer] notifications.onClicked', notificationId);
+  appendLog({ event: 'notifications.onClicked', notificationId });
+});
+
+chrome.notifications.onClosed.addListener((notificationId, byUser) => {
+  console.log('[API Explorer] notifications.onClosed', notificationId, byUser);
+  appendLog({ event: 'notifications.onClosed', notificationId, byUser });
+});
+
 // --- Commands ---
 
 chrome.commands.onCommand.addListener((command) => {
@@ -313,6 +335,61 @@ async function handleMessage(message) {
       // Write a test value — the onChanged listener above will log it
       await chrome.storage.local.set({ _testOnChanged: message.value || 'test-' + Date.now() });
       return { written: true };
+    }
+
+    case 'queryIdleState': {
+      const state = await chrome.idle.queryState(message.detectionInterval || 60);
+      return { idleState: state };
+    }
+
+    case 'setIdleDetectionInterval': {
+      chrome.idle.setDetectionInterval(message.interval || 60);
+      return { success: true };
+    }
+
+    case 'createNotification': {
+      const id = await chrome.notifications.create(message.notificationId || null, {
+        type: 'basic',
+        title: message.title || 'Test Notification',
+        message: message.message || 'This is a test notification from API Explorer',
+        iconUrl: message.iconUrl || chrome.runtime.getURL('icon.png')
+      });
+      return { notificationId: id };
+    }
+
+    case 'clearNotification': {
+      const cleared = await chrome.notifications.clear(message.notificationId);
+      return { wasCleared: cleared };
+    }
+
+    case 'getAllNotifications': {
+      const all = await chrome.notifications.getAll();
+      return { notifications: all };
+    }
+
+    case 'getManagementSelf': {
+      const info = await chrome.management.getSelf();
+      return { extensionInfo: info };
+    }
+
+    case 'getManagementAll': {
+      const all = await chrome.management.getAll();
+      return { extensions: all };
+    }
+
+    case 'captureVisibleTab': {
+      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+      return { dataUrl: dataUrl ? dataUrl.substring(0, 50) + '...' : null };
+    }
+
+    case 'reloadTab': {
+      await chrome.tabs.reload(message.tabId);
+      return { success: true };
+    }
+
+    case 'getAllFrames': {
+      const frames = await chrome.webNavigation.getAllFrames({ tabId: message.tabId });
+      return { frames: frames };
     }
 
     default:

@@ -76,6 +76,18 @@ struct ChromeActionAPI {
                 return promise;
             };
 
+            chrome.action.openPopup = function(options, callback) {
+                const promise = actionRequest('openPopup', options || {});
+                if (callback) { promise.then(function() { callback(); }); return; }
+                return promise;
+            };
+
+            chrome.action.getUserSettings = function(callback) {
+                const promise = actionRequest('getUserSettings', {});
+                if (callback) { promise.then(callback); return; }
+                return promise;
+            };
+
             var _onClickedListeners = [];
             chrome.action.onClicked = __detourMakeEventEmitter(_onClickedListeners);
         })();

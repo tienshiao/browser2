@@ -2,9 +2,11 @@ import Foundation
 
 /// Generates the `chrome.runtime` polyfill JavaScript for a given extension.
 struct ChromeRuntimeAPI {
-    static func generateJS(extensionID: String, manifest: ExtensionManifest, isContentScript: Bool = true) -> String {
+    static func generateJS(extensionID: String, manifest: ExtensionManifest, isContentScript: Bool = true, rawManifestJSON: String? = nil) -> String {
         let manifestJSON: String
-        if let data = try? manifest.toJSONData(),
+        if let raw = rawManifestJSON {
+            manifestJSON = raw
+        } else if let data = try? manifest.toJSONData(),
            let str = String(data: data, encoding: .utf8) {
             manifestJSON = str
         } else {
@@ -39,7 +41,7 @@ struct ChromeRuntimeAPI {
             };
 
             chrome.runtime.getURL = function(path) {
-                return 'extension://' + extensionID + '/' + (path.startsWith('/') ? path.substring(1) : path);
+                return 'chrome-extension://' + extensionID + '/' + (path.startsWith('/') ? path.substring(1) : path);
             };
 
             // Assign a stable frameId: 0 for top frame, unique non-zero for subframes.
@@ -213,18 +215,37 @@ struct ChromeRuntimeAPI {
 
             // Internal: called by native bridge to dispatch incoming messages
             window.__extensionDispatchMessage = function(message, sender, callbackID) {
-                for (const listener of messageListeners) {
-                    const result = listener(message, sender, function(response) {
-                        // Send response back through bridge
-                        window.webkit.messageHandlers.extensionMessage.postMessage({
-                            extensionID: extensionID,
-                            type: 'runtime.sendResponse',
-                            response: response,
-                            callbackID: callbackID
-                        });
+                if (messageListeners.length === 0) return;
+
+                var responseSent = false;
+                var sendResponse = function(response) {
+                    if (responseSent) return; // Chrome only allows one response
+                    responseSent = true;
+                    window.webkit.messageHandlers.extensionMessage.postMessage({
+                        extensionID: extensionID,
+                        type: 'runtime.sendResponse',
+                        response: response,
+                        callbackID: callbackID
                     });
-                    // If listener returns true, it will send response asynchronously
-                    if (result === true) return;
+                };
+
+                for (var i = 0; i < messageListeners.length; i++) {
+                    try {
+                        var result = messageListeners[i](message, sender, sendResponse);
+                        // Chrome MV3: if listener returns a Promise, resolve it as the response
+                        if (result && typeof result === 'object' && typeof result.then === 'function') {
+                            result.then(function(response) {
+                                if (response !== undefined) sendResponse(response);
+                            }).catch(function(err) {
+                                console.error('[chrome.runtime.onMessage] Promise rejected:', err);
+                            });
+                            return; // channel kept open for Promise
+                        }
+                        // If listener returns true, it will call sendResponse asynchronously
+                        if (result === true) return;
+                    } catch(e) {
+                        console.error('[chrome.runtime.onMessage] listener error:', e);
+                    }
                 }
             };
 
@@ -323,11 +344,100 @@ struct ChromeRuntimeAPI {
                 };
             }
 
+            // chrome.runtime.OnInstalledReason constants (used by 1Password and others)
+            chrome.runtime.OnInstalledReason = {
+                INSTALL: 'install',
+                UPDATE: 'update',
+                CHROME_UPDATE: 'chrome_update',
+                SHARED_MODULE_UPDATE: 'shared_module_update'
+            };
+
+            // chrome.runtime.requestUpdateCheck
+            chrome.runtime.requestUpdateCheck = function(callback) {
+                var result = { status: 'no_update', version: '' };
+                if (callback) { callback(result); return; }
+                return Promise.resolve(result);
+            };
+
+            // chrome.runtime.getBackgroundPage (MV2 compat stub)
+            chrome.runtime.getBackgroundPage = function(callback) {
+                if (callback) { callback(null); return; }
+                return Promise.resolve(null);
+            };
+
+            // chrome.runtime.reload — restarts the extension
+            chrome.runtime.reload = function() {
+                window.webkit.messageHandlers.extensionMessage.postMessage({
+                    extensionID: extensionID,
+                    type: 'runtime.reload',
+                    isContentScript: \(isContentScript ? "true" : "false")
+                });
+            };
+
+            // chrome.runtime.onSuspend / onSuspendCanceled (stub event emitters)
+            var onSuspendListeners = [];
+            var onSuspendCanceledListeners = [];
+            chrome.runtime.onSuspend = __detourMakeEventEmitter(onSuspendListeners);
+            chrome.runtime.onSuspendCanceled = __detourMakeEventEmitter(onSuspendCanceledListeners);
+
+            // chrome.runtime.onMessageExternal (stub event emitter)
+            var onMessageExternalListeners = [];
+            chrome.runtime.onMessageExternal = __detourMakeEventEmitter(onMessageExternalListeners);
+
+            // chrome.runtime.onConnectExternal (stub event emitter)
+            var onConnectExternalListeners = [];
+            chrome.runtime.onConnectExternal = __detourMakeEventEmitter(onConnectExternalListeners);
+
             // chrome.runtime.getPlatformInfo
             chrome.runtime.getPlatformInfo = function(callback) {
                 var info = { os: 'mac', arch: 'arm' };
                 if (callback) { callback(info); return; }
                 return Promise.resolve(info);
+            };
+
+            // chrome.runtime.connectNative — returns a Port connected to a native messaging host
+            chrome.runtime.connectNative = function(application) {
+                var portID = 'nativeport_' + Date.now() + '_' + (nextPortID++);
+                var port = createPort(portID, application);
+                window.__extensionPorts[portID] = port;
+
+                window.webkit.messageHandlers.extensionMessage.postMessage({
+                    extensionID: extensionID,
+                    type: 'runtime.connectNative',
+                    portID: portID,
+                    application: application,
+                    isContentScript: \(isContentScript ? "true" : "false")
+                });
+
+                return port;
+            };
+
+            // chrome.runtime.sendNativeMessage — one-shot message to a native host
+            chrome.runtime.sendNativeMessage = function(application, message, callback) {
+                return new Promise(function(resolve, reject) {
+                    var callbackID = 'cb_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                    if (!window.__extensionCallbacks) window.__extensionCallbacks = {};
+                    window.__extensionCallbacks[callbackID] = function(response) {
+                        delete window.__extensionCallbacks[callbackID];
+                        if (response && response.__error) {
+                            var err = new Error(response.__error);
+                            if (callback) { chrome.runtime.lastError = { message: response.__error }; callback(); chrome.runtime.lastError = null; return; }
+                            reject(err);
+                        } else {
+                            if (callback) { callback(response); return; }
+                            resolve(response);
+                        }
+                    };
+
+                    window.webkit.messageHandlers.extensionMessage.postMessage({
+                        extensionID: extensionID,
+                        type: 'runtime.sendNativeMessage',
+                        application: application,
+                        message: message,
+                        callbackID: callbackID,
+                        isContentScript: \(isContentScript ? "true" : "false")
+                    });
+                });
             };
         })();
         """

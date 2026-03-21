@@ -16,7 +16,7 @@ targets:
       - package: GRDB
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.detour.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.detourbrowser.mac
         INFOPLIST_FILE: Detour/Resources/Info.plist
         SWIFT_VERSION: "5.10"
         MACOSX_DEPLOYMENT_TARGET: "14.0"

@@ -24,6 +24,14 @@ class WebExtension {
         loadIcon()
     }()
 
+    /// Raw manifest.json string read from disk, used by chrome.runtime.getManifest()
+    /// to return ALL fields (not just the ones we parse into ExtensionManifest).
+    private(set) lazy var rawManifestJSON: String? = {
+        let url = basePath.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }()
+
     init(id: String, manifest: ExtensionManifest, basePath: URL, isEnabled: Bool = true) {
         self.id = id
         self.manifest = manifest
@@ -47,13 +55,16 @@ class WebExtension {
         return nil
     }
 
-    /// The popup page URL using the custom `extension://` scheme.
+    /// The popup page URL using the custom `chrome-extension://` scheme.
+    /// Uses the custom popup path set via `chrome.action.setPopup()` if available,
+    /// otherwise falls back to the manifest's `default_popup`.
     var popupURL: URL? {
-        guard let popup = manifest.action?.defaultPopup else { return nil }
+        let popup = ExtensionManager.shared.customPopupPaths[id] ?? manifest.action?.defaultPopup
+        guard let popup else { return nil }
         return ExtensionPageSchemeHandler.url(for: id, path: popup)
     }
 
-    /// The options page URL using the custom `extension://` scheme.
+    /// The options page URL using the custom `chrome-extension://` scheme.
     var optionsURL: URL? {
         if let page = manifest.optionsUI?.page ?? manifest.optionsPage {
             return ExtensionPageSchemeHandler.url(for: id, path: page)

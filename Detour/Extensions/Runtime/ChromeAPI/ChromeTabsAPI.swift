@@ -80,12 +80,72 @@ struct ChromeTabsAPI {
                 return promise;
             };
 
+            chrome.tabs.TAB_ID_NONE = -1;
+
+            chrome.tabs.reload = function(tabId, reloadProperties, callback) {
+                if (typeof tabId === 'object') {
+                    callback = reloadProperties;
+                    reloadProperties = tabId;
+                    tabId = null;
+                }
+                if (typeof reloadProperties === 'function') {
+                    callback = reloadProperties;
+                    reloadProperties = {};
+                }
+                const promise = tabsRequest('reload', { tabId: tabId, reloadProperties: reloadProperties || {} });
+                if (callback) { promise.then(function() { callback(); }); return; }
+                return promise;
+            };
+
+            chrome.tabs.insertCSS = function(tabId, details, callback) {
+                if (typeof tabId === 'object') {
+                    callback = details;
+                    details = tabId;
+                    tabId = null;
+                }
+                const promise = tabsRequest('insertCSS', { injection: { target: { tabId: tabId }, css: details.code, files: details.file ? [details.file] : undefined } });
+                if (callback) { promise.then(function() { callback(); }); return; }
+                return promise;
+            };
+
             chrome.tabs.detectLanguage = function(tabId, callback) {
                 if (typeof tabId === 'function') {
                     callback = tabId;
                     tabId = null;
                 }
                 var promise = tabsRequest('detectLanguage', { tabId: tabId });
+                if (callback) { promise.then(callback); return; }
+                return promise;
+            };
+
+            // Legacy MV2 tabs.executeScript — delegates to scripting.executeScript
+            chrome.tabs.executeScript = function(tabId, details, callback) {
+                if (typeof tabId === 'object') {
+                    callback = details;
+                    details = tabId;
+                    tabId = null;
+                }
+                var injection = { target: { tabId: tabId } };
+                if (details.code) injection.func = details.code;
+                if (details.file) injection.files = [details.file];
+
+                var promise = tabsRequest('executeScript', { injection: injection });
+                if (callback) { promise.then(function(r) { callback(r); }).catch(function() { callback([]); }); return; }
+                return promise;
+            };
+
+            chrome.tabs.captureVisibleTab = function(windowId, options, callback) {
+                if (typeof windowId === 'object') {
+                    callback = options;
+                    options = windowId;
+                    windowId = null;
+                }
+                if (typeof windowId === 'function') {
+                    callback = windowId;
+                    windowId = null;
+                    options = {};
+                }
+                const promise = tabsRequest('captureVisibleTab', { windowId: windowId, options: options || {} });
                 if (callback) { promise.then(callback); return; }
                 return promise;
             };

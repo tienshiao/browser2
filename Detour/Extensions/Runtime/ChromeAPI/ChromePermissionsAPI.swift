@@ -58,6 +58,18 @@ struct ChromePermissionsAPI {
                 return Promise.resolve(result);
             };
 
+            chrome.permissions.addHostAccessRequest = function(request, callback) {
+                // Stub — no-op
+                if (callback) { callback(); return; }
+                return Promise.resolve();
+            };
+
+            chrome.permissions.removeHostAccessRequest = function(request, callback) {
+                // Stub — no-op
+                if (callback) { callback(); return; }
+                return Promise.resolve();
+            };
+
             var _onAddedListeners = [];
             var _onRemovedListeners = [];
             chrome.permissions.onAdded = __detourMakeEventEmitter(_onAddedListeners);

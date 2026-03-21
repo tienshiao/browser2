@@ -145,7 +145,8 @@ extension BrowserWindowController: WKNavigationDelegate {
         }
 
         do {
-            let unpackedDir = try CRXUnpacker.unpack(data: data)
+            let crxResult = try CRXUnpacker.unpack(data: data)
+            let unpackedDir = crxResult.directory
             defer { try? FileManager.default.removeItem(at: unpackedDir) }
 
             // Parse manifest for permission prompt
@@ -171,7 +172,7 @@ extension BrowserWindowController: WKNavigationDelegate {
 
             guard confirmAlert.runModal() == .alertFirstButtonReturn else { return }
 
-            try ExtensionManager.shared.install(from: unpackedDir)
+            try ExtensionManager.shared.install(from: unpackedDir, publicKey: crxResult.publicKey)
 
             let successAlert = NSAlert()
             successAlert.messageText = "Extension Installed"
@@ -221,16 +222,18 @@ extension BrowserWindowController: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Fire chrome.webNavigation.onCompleted for extensions
+        // Fire chrome.webNavigation.onDOMContentLoaded and onCompleted for extensions
         if let tab = selectedTab, let url = webView.url {
             let mgr = ExtensionManager.shared
             let tabID = mgr.tabIDMap.intID(for: tab.id)
-            mgr.fireWebNavigationEvent("onCompleted", details: [
+            let details: [String: Any] = [
                 "tabId": tabID,
                 "url": url.absoluteString,
                 "frameId": 0,
                 "timeStamp": Date().timeIntervalSince1970 * 1000
-            ])
+            ]
+            mgr.fireWebNavigationEvent("onDOMContentLoaded", details: details)
+            mgr.fireWebNavigationEvent("onCompleted", details: details)
         }
     }
 

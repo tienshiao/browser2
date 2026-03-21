@@ -31,13 +31,10 @@ class OffscreenDocumentHost: NSObject, WKNavigationDelegate {
 
         if let completion { loadCompletionHandlers.append(completion) }
 
-        // Read the HTML and load via loadHTMLString (same pattern as BackgroundHost).
-        // This ensures WKUserScripts fire correctly at document start.
-        let fileURL = ext.basePath.appendingPathComponent(url)
-        let htmlContent = (try? String(contentsOf: fileURL, encoding: .utf8))
-            ?? "<html><body></body></html>"
-        let baseURL = ExtensionPageSchemeHandler.url(for: ext.id, path: "/")
-        wv.loadHTMLString(htmlContent, baseURL: baseURL)
+        // Load via the chrome-extension:// scheme handler so module scripts
+        // and absolute-path resource references resolve correctly.
+        let pageURL = ExtensionPageSchemeHandler.url(for: ext.id, path: url)
+        wv.load(URLRequest(url: pageURL))
     }
 
     // MARK: - Native Audio Playback

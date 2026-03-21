@@ -2,28 +2,60 @@ import Foundation
 import WebKit
 import UniformTypeIdentifiers
 
-/// Serves extension files for the `extension://` custom URL scheme.
+/// Serves extension files for the `chrome-extension://` custom URL scheme.
 ///
-/// URL format: `extension://{extensionID}/{path}`
+/// URL format: `chrome-extension://{extensionID}/{path}`
 ///
 /// The handler resolves the path against the extension's base directory on disk
 /// and returns the file contents with the appropriate MIME type. This keeps
 /// chrome API polyfills and message bridges scoped to extension pages only.
 class ExtensionPageSchemeHandler: NSObject, WKURLSchemeHandler {
-    static let scheme = "extension"
+    static let scheme = "chrome-extension"
     static let shared = ExtensionPageSchemeHandler()
 
     static func register(on config: WKWebViewConfiguration) {
         config.setURLSchemeHandler(shared, forURLScheme: scheme)
     }
 
-    /// Build an `extension://` URL for a given extension and relative path.
+    /// Build a `chrome-extension://` URL for a given extension and relative path.
     static func url(for extensionID: String, path: String) -> URL {
+        // Split path from query string if present (e.g. "popup/index.html?locked=true")
+        let parts = path.split(separator: "?", maxSplits: 1)
+        let pathPart = String(parts[0])
+        let queryPart = parts.count > 1 ? String(parts[1]) : nil
+
         var components = URLComponents()
         components.scheme = scheme
         components.host = extensionID
-        components.path = "/" + (path.hasPrefix("/") ? String(path.dropFirst()) : path)
+        components.path = "/" + (pathPart.hasPrefix("/") ? String(pathPart.dropFirst()) : pathPart)
+        if let queryPart {
+            components.query = queryPart
+        }
         return components.url!
+    }
+
+    /// Registry of synthetic HTML pages keyed by "extensionID/path".
+    /// Used to serve dynamically generated pages (e.g. background host HTML) via the scheme handler.
+    /// Access is serialized via `syntheticPagesQueue` since WKURLSchemeHandler callbacks
+    /// can arrive on WebKit networking threads while mutations happen on the main thread.
+    private var syntheticPages: [String: Data] = [:]
+    private let syntheticPagesQueue = DispatchQueue(label: "com.detour.synthetic-pages")
+
+    /// Register a synthetic HTML page that will be served at the given extension path.
+    func registerSyntheticPage(extensionID: String, path: String, html: String) {
+        let key = "\(extensionID)/\(path)"
+        let data = html.data(using: .utf8)
+        syntheticPagesQueue.sync { syntheticPages[key] = data }
+    }
+
+    /// Remove a synthetic page registration.
+    func removeSyntheticPage(extensionID: String, path: String) {
+        let key = "\(extensionID)/\(path)"
+        syntheticPagesQueue.sync { _ = syntheticPages.removeValue(forKey: key) }
+    }
+
+    private func syntheticPageData(for key: String) -> Data? {
+        syntheticPagesQueue.sync { syntheticPages[key] }
     }
 
     func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
@@ -38,6 +70,25 @@ class ExtensionPageSchemeHandler: NSObject, WKURLSchemeHandler {
         let relativePath = String(url.path.dropFirst()) // drop leading "/"
         guard !relativePath.isEmpty else {
             urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
+            return
+        }
+
+        // Check for synthetic pages first (e.g. background host page)
+        let syntheticKey = "\(extensionID)/\(relativePath)"
+        if let syntheticData = syntheticPageData(for: syntheticKey) {
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: [
+                    "Content-Type": "text/html; charset=utf-8",
+                    "Content-Length": "\(syntheticData.count)",
+                    "Access-Control-Allow-Origin": "*",
+                ]
+            )!
+            urlSchemeTask.didReceive(response)
+            urlSchemeTask.didReceive(syntheticData)
+            urlSchemeTask.didFinish()
             return
         }
 
